@@ -1,0 +1,1912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spacecraft Autonomy — Mission Control</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* ── CSS Variables ─────────────────────────────────────────── */
+        :root {
+            --bg: #010204; /* Deepest black for base */
+            --panel: rgba(10, 15, 25, 0.35); /* Translucent for glassmorphism */
+            --panel-hover: rgba(15, 20, 35, 0.5);
+            --border: rgba(255, 255, 255, 0.1); /* Ultra-thin glass border */
+            --border-active: rgba(0, 212, 255, 0.4);
+            --text: #f8fafc;
+            --muted: #cbd5e1;
+            --dim: #64748b;
+            --cyan: #00E5FF; /* Electric neon cyan */
+            --cyan-dim: rgba(0, 229, 255, 0.15);
+            --green: #00FF88;
+            --green-dim: rgba(0, 255, 136, 0.15);
+            --amber: #FFB703;
+            --amber-dim: rgba(255, 183, 3, 0.15);
+            --red: #FF0055;
+            --red-dim: rgba(255, 0, 85, 0.15);
+            --purple: #9D4EDD;
+            --purple-dim: rgba(157, 78, 221, 0.15);
+            --mono: 'JetBrains Mono', 'Consolas', 'Monaco', monospace;
+            --sans: 'Inter', system-ui, -apple-system, sans-serif;
+            --glow-cyan: 0 0 15px rgba(0, 229, 255, 0.2), 0 0 30px rgba(0, 229, 255, 0.1);
+            --glow-green: 0 0 15px rgba(0, 255, 136, 0.2);
+            --glow-red: 0 0 15px rgba(255, 0, 85, 0.2);
+            --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.6);
+        }
+
+        /* ── Reset & Base ──────────────────────────────────────────── */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--sans);
+            font-size: 13px;
+            min-height: 100vh;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ── 8K Cinematic Background ───────────────────────────────── */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-image: url('bg.png'); /* The generated premium background */
+            background-size: cover;
+            background-position: center;
+            opacity: 1.0;
+            pointer-events: none;
+            z-index: 0;
+        }
+        
+        /* Subtle Vignette Overlay for Depth */
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: radial-gradient(circle at center, transparent 30%, #000000 120%);
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        /* ── Slayers Badge ─────────────────────────────────────────── */
+        .slayers-badge {
+            position: fixed;
+            bottom: 25px;
+            right: 30px;
+            font-family: var(--mono);
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--cyan);
+            letter-spacing: 0.25em;
+            text-transform: uppercase;
+            text-shadow: var(--glow-cyan);
+            z-index: 1000;
+            pointer-events: none;
+        }
+
+        /* ── Intro Overlay ─────────────────────────────────────────── */
+        #intro-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: #0a0e17;
+            background-image: url('https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=2072&auto=format&fit=crop');
+            background-size: 150% auto;
+            background-position: center;
+            animation: earthSpin 120s linear infinite;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 1s ease-out;
+            cursor: pointer;
+            overflow: hidden;
+        }
+        @keyframes earthSpin {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        .hud-ring {
+            position: absolute;
+            top: 50%; left: 50%;
+            border-radius: 50%;
+            border: 1px solid rgba(0, 212, 255, 0.2);
+            z-index: 9999;
+            pointer-events: none;
+        }
+        .ring-1 { width: 400px; height: 400px; border-top: 2px solid var(--cyan); animation: spinRight 10s linear infinite; }
+        .ring-2 { width: 550px; height: 550px; border-bottom: 3px solid var(--cyan); animation: spinLeft 15s linear infinite; opacity: 0.5; }
+        .ring-3 { width: 700px; height: 700px; border: 1px dashed var(--cyan); animation: spinRight 25s linear infinite; opacity: 0.3; }
+
+        @keyframes spinRight {
+            0% { transform: translate(-50%, -50%) rotate(0deg); }
+            100% { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+        @keyframes spinLeft {
+            0% { transform: translate(-50%, -50%) rotate(0deg); }
+            100% { transform: translate(-50%, -50%) rotate(-360deg); }
+        }
+        #intro-overlay::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(10, 14, 23, 0.75);
+        }
+        .intro-content {
+            position: relative;
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .intro-text {
+            font-family: var(--mono);
+            font-size: 28px;
+            color: var(--cyan);
+            letter-spacing: 0.15em;
+            margin-bottom: 50px;
+            text-shadow: var(--glow-cyan);
+            animation: pulse-text 2s infinite;
+            text-align: center;
+        }
+        @keyframes pulse-text {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .rocket {
+            position: relative;
+            z-index: 10001;
+            transition: transform 1.5s cubic-bezier(0.5, 0, 0.2, 1);
+        }
+        .rocket.launch {
+            transform: translateY(-2000px);
+        }
+        .rocket-svg {
+            width: 150px;
+            height: auto;
+            filter: drop-shadow(0 0 25px rgba(0, 212, 255, 0.6));
+        }
+        @keyframes shake {
+            0% { transform: translate(1px, 1px) rotate(0deg); }
+            10% { transform: translate(-1px, -2px) rotate(-1deg); }
+            20% { transform: translate(-3px, 0px) rotate(1deg); }
+            30% { transform: translate(3px, 2px) rotate(0deg); }
+            40% { transform: translate(1px, -1px) rotate(1deg); }
+            50% { transform: translate(-1px, 2px) rotate(-1deg); }
+            60% { transform: translate(-3px, 1px) rotate(0deg); }
+            70% { transform: translate(3px, 1px) rotate(-1deg); }
+            80% { transform: translate(-1px, -1px) rotate(1deg); }
+            90% { transform: translate(1px, 2px) rotate(0deg); }
+            100% { transform: translate(1px, -2px) rotate(-1deg); }
+        }
+        .vibrate {
+            animation: shake 0.05s infinite;
+        }
+        
+        .smoke-particle {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(200,200,200,0.8) 0%, rgba(80,80,80,0) 70%);
+            pointer-events: none;
+            opacity: 0;
+            z-index: 10000;
+        }
+        
+        @keyframes puff {
+            0% { transform: translate(-50%, 0) scale(0.5); opacity: 1; }
+            100% { transform: translate(calc(-50% + var(--dx)), var(--dy)) scale(var(--scale)); opacity: 0; }
+        }
+
+
+        .dashboard {
+            position: relative;
+            z-index: 10;
+            padding: 12px 20px;
+            max-width: 1800px;
+            margin: 0 auto;
+            zoom: 0.85;
+        }
+
+        /* ── Status Bar ────────────────────────────────────────────── */
+        .status-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 24px;
+            background: var(--panel);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            border-bottom: 2px solid var(--cyan);
+            border-radius: 12px;
+            margin-bottom: 16px;
+            box-shadow: var(--glass-shadow);
+        }
+        .status-bar h1 {
+            font-family: var(--sans);
+            font-size: 16px;
+            font-weight: 700;
+            letter-spacing: 0.15em;
+            color: #fff;
+            text-shadow: 0 0 10px rgba(255,255,255,0.3);
+            text-transform: uppercase;
+        }
+        .status-bar h1 span {
+            color: var(--cyan);
+            font-weight: 400;
+            letter-spacing: 0.1em;
+            text-shadow: var(--glow-cyan);
+        }
+        .indicators {
+            display: flex;
+            gap: 24px;
+            font-family: var(--mono);
+            font-size: 11px;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+        .ind {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: color 0.3s;
+        }
+        .dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            background: var(--dim);
+            transition: background 0.3s, box-shadow 0.3s;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        .dot.on {
+            background: var(--green);
+            box-shadow: 0 0 10px var(--green), 0 0 20px rgba(0,255,136,0.4);
+            border-color: #fff;
+            animation: pulse-dot 2s ease-in-out infinite;
+        }
+        .dot.warn {
+            background: var(--amber);
+            box-shadow: 0 0 10px var(--amber);
+            border-color: #fff;
+        }
+        .dot.off { 
+            background: var(--red); 
+            box-shadow: 0 0 10px rgba(255,0,85,0.5); 
+            border-color: #fff;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; box-shadow: 0 0 10px var(--green), 0 0 20px rgba(0,255,136,0.4); }
+            50% { opacity: 0.6; box-shadow: 0 0 5px var(--green), 0 0 10px rgba(0,255,136,0.2); }
+        }
+
+        /* ── Grid Layouts ──────────────────────────────────────────── */
+        .row-3 {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        /* ── Glassmorphism Panels ──────────────────────────────────── */
+        .panel {
+            background: var(--panel);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 18px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: var(--glass-shadow);
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .panel::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            opacity: 0.5;
+        }
+        .panel:hover {
+            border-color: rgba(255, 255, 255, 0.2);
+            background: var(--panel-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.7);
+        }
+        .panel.glow-cyan:hover { box-shadow: var(--glow-cyan), var(--glass-shadow); border-color: rgba(0,229,255,0.3); }
+
+        /* Colored top border for agent panels (sleeker than left border) */
+        .panel.agent-panel {
+            border-top: 2px solid rgba(255,255,255,0.05);
+            transition: border-top-color 0.5s;
+        }
+        .panel.agent-panel.active-perc { border-top-color: var(--purple); }
+        .panel.agent-panel.active-cog { border-top-color: var(--amber); }
+        .panel.agent-panel.active-act { border-top-color: var(--green); }
+        .panel.agent-panel.active-orch { border-top-color: var(--cyan); }
+
+        .panel-title {
+            font-family: var(--sans);
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: #fff;
+            margin-bottom: 14px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .panel-title .phase-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: var(--mono);
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .phase-perc { background: var(--purple-dim); color: var(--purple); border-color: var(--purple) !important; }
+        .phase-cog { background: var(--amber-dim); color: var(--amber); border-color: var(--amber) !important; }
+        .phase-act { background: var(--green-dim); color: var(--green); border-color: var(--green) !important; }
+        .phase-orch { background: var(--cyan-dim); color: var(--cyan); border-color: var(--cyan) !important; }
+
+        /* ── Data Rows ─────────────────────────────────────────────── */
+        .data-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 0;
+            font-family: var(--mono);
+            font-size: 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.02);
+        }
+        .data-row:last-child { border-bottom: none; }
+        .data-row .lbl { color: var(--muted); font-size: 11px; }
+        .data-row .val {
+            font-weight: 600;
+            color: #fff;
+            text-shadow: 0 0 10px rgba(255,255,255,0.2);
+            transition: color 0.3s;
+        }
+
+        /* ── Tags ──────────────────────────────────────────────────── */
+        .tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: var(--mono);
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            box-shadow: inset 0 0 10px rgba(255,255,255,0.05);
+        }
+        .tag.green { background: var(--green-dim); color: var(--green); border: 1px solid rgba(0,255,136,0.2); text-shadow: 0 0 8px var(--green); }
+        .tag.amber { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(255,183,3,0.2); text-shadow: 0 0 8px var(--amber); }
+        .tag.red { background: var(--red-dim); color: var(--red); border: 1px solid rgba(255,0,85,0.2); text-shadow: 0 0 8px var(--red); }
+        .tag.cyan { background: var(--cyan-dim); color: var(--cyan); border: 1px solid rgba(0,229,255,0.2); text-shadow: 0 0 8px var(--cyan); }
+        .tag.purple { background: var(--purple-dim); color: var(--purple); border: 1px solid rgba(157,78,221,0.2); text-shadow: 0 0 8px var(--purple); }
+
+        /* ── Buttons ───────────────────────────────────────────────── */
+        .btn {
+            padding: 8px 16px;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.03);
+            color: #fff;
+            border-radius: 6px;
+            cursor: pointer;
+            font-family: var(--sans);
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            backdrop-filter: blur(4px);
+        }
+        .btn:hover { 
+            border-color: var(--cyan); 
+            color: var(--cyan); 
+            background: rgba(0,229,255,0.1); 
+            box-shadow: 0 0 15px rgba(0,229,255,0.2);
+        }
+        .btn:active { transform: scale(0.96); }
+        .btn:disabled { opacity: 0.3; cursor: not-allowed; pointer-events: none; }
+        
+        .btn.primary { 
+            background: rgba(0,229,255,0.15); 
+            color: var(--cyan); 
+            border-color: var(--cyan); 
+            text-shadow: 0 0 8px rgba(0,229,255,0.5);
+        }
+        .btn.primary:hover { background: rgba(0,229,255,0.3); box-shadow: 0 0 20px rgba(0,229,255,0.4); color: #fff;}
+        
+        .btn.success { border-color: var(--green); color: var(--green); }
+        .btn.success:hover { background: rgba(0,255,136,0.1); box-shadow: 0 0 15px rgba(0,255,136,0.3); }
+        
+        .btn.danger { border-color: var(--red); color: var(--red); }
+        .btn.danger:hover { background: rgba(255,0,85,0.1); box-shadow: 0 0 15px rgba(255,0,85,0.3); }
+
+        /* ── Inputs ────────────────────────────────────────────────── */
+        select, input[type="text"], input[type="number"], textarea {
+            padding: 8px 12px;
+            background: rgba(0,0,0,0.4);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 6px;
+            font-family: var(--mono);
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        select:focus, input:focus, textarea:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 12px rgba(0,229,255,0.2); background: rgba(0,0,0,0.6); }
+        input[type="file"] { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+        input[type="checkbox"] { accent-color: var(--cyan); width: 14px; height: 14px; cursor: pointer;}
+
+        /* ── Tactical Camera Panel ─────────────────────────────────── */
+        .camera-container {
+            position: relative;
+            background: #020408;
+            border-radius: 8px;
+            overflow: hidden;
+            aspect-ratio: 4/3;
+            margin-bottom: 12px;
+            border: 1px solid rgba(255,255,255,0.05);
+            box-shadow: inset 0 0 30px rgba(0,0,0,0.8);
+        }
+        
+        /* Tactical Corner Brackets */
+        .camera-container::before {
+            content: '';
+            position: absolute;
+            top: 10px; left: 10px; right: 10px; bottom: 10px;
+            border: 1px solid rgba(255,255,255,0.1);
+            pointer-events: none;
+            z-index: 5;
+            mask: 
+                linear-gradient(to right, #000 20px, transparent 20px, transparent calc(100% - 20px), #000 calc(100% - 20px)) top / 100% 1px no-repeat,
+                linear-gradient(to right, #000 20px, transparent 20px, transparent calc(100% - 20px), #000 calc(100% - 20px)) bottom / 100% 1px no-repeat,
+                linear-gradient(to bottom, #000 20px, transparent 20px, transparent calc(100% - 20px), #000 calc(100% - 20px)) left / 1px 100% no-repeat,
+                linear-gradient(to bottom, #000 20px, transparent 20px, transparent calc(100% - 20px), #000 calc(100% - 20px)) right / 1px 100% no-repeat;
+            -webkit-mask: 
+                linear-gradient(to right, #000 20px, transparent 20px, transparent calc(100% - 20px), #000 calc(100% - 20px)) top / 100% 1px no-repeat,
+                linear-gradient(to right, #000 20px, transparent 20px, transparent calc(100% - 20px), #000 calc(100% - 20px)) bottom / 100% 1px no-repeat,
+                linear-gradient(to bottom, #000 20px, transparent 20px, transparent calc(100% - 20px), #000 calc(100% - 20px)) left / 1px 100% no-repeat,
+                linear-gradient(to bottom, #000 20px, transparent 20px, transparent calc(100% - 20px), #000 calc(100% - 20px)) right / 1px 100% no-repeat;
+        }
+        
+        /* Crosshair */
+        .camera-container::after {
+            content: '+';
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            color: rgba(0, 229, 255, 0.4);
+            font-family: var(--mono);
+            font-size: 16px;
+            font-weight: 300;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        .camera-container video, .camera-container canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+            filter: contrast(1.1) brightness(0.9);
+        }
+        #cam-canvas { display: none; }
+
+        /* CRT Scanline overlay */
+        .scanline-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                rgba(0, 0, 0, 0.15),
+                rgba(0, 0, 0, 0.15) 1px,
+                transparent 1px,
+                transparent 2px
+            );
+            pointer-events: none;
+            z-index: 2;
+        }
+        .scanline-overlay::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 6px;
+            background: linear-gradient(180deg, transparent, rgba(0,229,255,0.15), transparent);
+            animation: scan 4s linear infinite;
+            z-index: 3;
+            box-shadow: 0 0 20px rgba(0,229,255,0.2);
+        }
+        @keyframes scan {
+            0% { top: -10%; }
+            100% { top: 110%; }
+        }
+        
+        .cam-badge {
+            position: absolute;
+            top: 12px; left: 12px;
+            padding: 3px 8px;
+            font-family: var(--sans);
+            font-size: 10px;
+            font-weight: 800;
+            border-radius: 4px;
+            z-index: 6;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            backdrop-filter: blur(4px);
+        }
+        .cam-badge.live { background: rgba(255,0,85,0.8); color: #fff; animation: pulse-dot 1.5s ease-in-out infinite; box-shadow: 0 0 10px rgba(255,0,85,0.5); border: 1px solid #ff0055;}
+        .cam-badge.off { background: rgba(0,0,0,0.6); color: var(--muted); border: 1px solid rgba(255,255,255,0.2); }
+        
+        .cam-rec-dot {
+            position: absolute;
+            top: 14px; right: 14px;
+            font-family: var(--mono);
+            font-size: 11px;
+            color: #fff;
+            text-shadow: 0 0 5px #000;
+            z-index: 6;
+        }
+        .cam-controls {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+        .model-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 5px;
+            font-family: var(--mono);
+            font-size: 10px;
+            font-weight: 700;
+            border: 1px solid transparent;
+            text-transform: uppercase;
+        }
+        .model-badge.loaded { background: var(--green-dim); color: var(--green); border-color: rgba(0,255,136,0.3); text-shadow: 0 0 8px rgba(0,255,136,0.5); }
+        .model-badge.not-loaded { background: var(--red-dim); color: var(--red); border-color: rgba(255,0,85,0.3); }
+
+        /* ── Premium Jensen Gain Gauge ─────────────────────────────── */
+        .gauge-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 0;
+            position: relative;
+        }
+        .gauge-svg {
+            width: 100%;
+            max-width: 300px;
+            filter: drop-shadow(0 0 10px rgba(0,0,0,0.5));
+        }
+        .gauge-value {
+            font-family: var(--mono);
+            font-size: 38px;
+            font-weight: 800;
+            color: #fff;
+            text-shadow: 0 0 25px rgba(0,229,255,0.6), 0 0 10px rgba(0,229,255,0.4);
+            margin-top: -15px;
+            letter-spacing: -0.05em;
+        }
+        .gauge-label {
+            font-family: var(--sans);
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+            margin-top: 6px;
+        }
+        .gauge-conf {
+            margin-top: 12px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        /* ── Tactical Radar Trajectory Canvas ──────────────────────── */
+        .trajectory-container {
+            position: relative;
+            padding: 4px;
+        }
+        .trajectory-canvas {
+            width: 100%;
+            aspect-ratio: 1;
+            border-radius: 50%; /* Radar circular look */
+            background: radial-gradient(circle at center, rgba(0, 229, 255, 0.05) 0%, #020408 70%);
+            display: block;
+            border: 2px solid rgba(0, 229, 255, 0.15);
+            box-shadow: inset 0 0 40px rgba(0,0,0,0.8), 0 0 20px rgba(0, 229, 255, 0.1);
+        }
+        
+        /* Sweeping radar arm */
+        .trajectory-container::after {
+            content: '';
+            position: absolute;
+            top: 4px; left: 4px; right: 4px; bottom: 4px;
+            border-radius: 50%;
+            background: conic-gradient(from 0deg, transparent 70%, rgba(0, 229, 255, 0.3) 100%);
+            animation: radarSweep 4s linear infinite;
+            pointer-events: none;
+            mix-blend-mode: screen;
+        }
+        @keyframes radarSweep {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .trajectory-overlay {
+            position: absolute;
+            bottom: 12px; left: 50%;
+            transform: translateX(-50%);
+            font-family: var(--mono);
+            font-size: 12px;
+            font-weight: 700;
+            color: #fff;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+            padding: 4px 12px;
+            border-radius: 20px;
+            border: 1px solid rgba(0, 229, 255, 0.3);
+            text-shadow: 0 0 8px rgba(0, 229, 255, 0.8);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            z-index: 10;
+        }
+
+        /* ── Override Panel ────────────────────────────────────────── */
+        .override-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .override-btn {
+            padding: 10px;
+            text-align: center;
+            font-size: 11px;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .override-btn.selected {
+            border-color: var(--cyan) !important;
+            background: rgba(0,229,255,0.15) !important;
+            color: #fff !important;
+            text-shadow: 0 0 10px rgba(0,229,255,0.8);
+            box-shadow: inset 0 0 15px rgba(0,229,255,0.2);
+        }
+
+        /* ── Chat Terminal ─────────────────────────────────────────── */
+        #chat-log {
+            height: 160px;
+            overflow-y: auto;
+            font-size: 12px;
+            margin-bottom: 10px;
+            padding: 12px;
+            background: rgba(0,0,0,0.5);
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 8px;
+            font-family: var(--mono);
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+        }
+        .chat-msg { margin-bottom: 8px; line-height: 1.6; letter-spacing: 0.02em; }
+        .chat-msg.user { color: #fff; text-shadow: 0 0 5px rgba(255,255,255,0.3); }
+        .chat-msg.system { color: var(--cyan); text-shadow: 0 0 8px rgba(0,229,255,0.4); }
+        .chat-route { font-size: 10px; color: var(--dim); text-transform: uppercase; }
+
+        /* ── Controls Bar ──────────────────────────────────────────── */
+        .controls-bar {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 12px 20px;
+            background: var(--panel);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+            box-shadow: var(--glass-shadow);
+        }
+        .controls-bar .ctrl-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .controls-bar .ctrl-sep {
+            width: 1px;
+            height: 28px;
+            background: rgba(255,255,255,0.1);
+        }
+        .ctrl-label {
+            font-family: var(--sans);
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        /* ── Cyberpunk Event Log ───────────────────────────────────── */
+        #event-log {
+            height: 200px;
+            overflow-y: auto;
+            font-family: var(--mono);
+            font-size: 11px;
+            line-height: 1.8;
+            background: rgba(0,0,0,0.6);
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.05);
+            box-shadow: inset 0 0 30px rgba(0,0,0,0.8);
+            letter-spacing: 0.03em;
+        }
+        .log-entry { padding: 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-bottom: 1px solid rgba(255,255,255,0.02); }
+        .log-time { color: var(--dim); font-size: 10px; }
+        .log-ch { font-weight: 700; text-transform: uppercase; font-size: 10px; margin-right: 6px;}
+        .log-ch.perception { color: var(--purple); text-shadow: 0 0 5px var(--purple); }
+        .log-ch.cognition { color: var(--amber); text-shadow: 0 0 5px var(--amber); }
+        .log-ch.action { color: var(--green); text-shadow: 0 0 5px var(--green); }
+        .log-ch.orchestrator { color: var(--cyan); text-shadow: 0 0 5px var(--cyan); }
+        .log-ch.human { color: var(--red); text-shadow: 0 0 5px var(--red); }
+        .log-ch.system { color: var(--dim); font-style: italic; }
+
+        /* ── Scrollbar ─────────────────────────────────────────────── */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(0,229,255,0.3); }
+
+        /* ── Value flash animation ─────────────────────────────────── */
+        .val-flash {
+            animation: flash-val 0.8s ease-out;
+        }
+        @keyframes flash-val {
+            0% { color: #fff; text-shadow: 0 0 15px rgba(255,255,255,0.8), 0 0 30px rgba(0,229,255,0.8); transform: scale(1.05); display: inline-block;}
+            100% { color: inherit; text-shadow: 0 0 10px rgba(255,255,255,0.2); transform: scale(1); display: inline-block;}
+        }
+
+        /* ── Responsive ────────────────────────────────────────────── */
+        @media (max-width: 1200px) {
+            .row-3 { grid-template-columns: 1fr; }
+        }
+
+
+    </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- INTRO OVERLAY                                                      -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div id="intro-overlay" onclick="launchRocket()">
+    <!-- Rotating HUD Rings -->
+    <div class="hud-ring ring-1"></div>
+    <div class="hud-ring ring-2"></div>
+    <div class="hud-ring ring-3"></div>
+
+    <div class="intro-content">
+        <div class="rocket" id="intro-rocket">
+            <svg class="rocket-svg" id="rocket-svg" viewBox="0 0 100 250" xmlns="http://www.w3.org/2000/svg">
+              <!-- Flame -->
+              <path id="flame" d="M50,210 Q35,270 50,260 Q65,270 50,210" fill="#f59e0b" opacity="0"/>
+              <!-- Main Body -->
+              <path d="M50,10 C50,10 30,50 30,150 L30,200 L70,200 L70,150 C70,50 50,10 50,10 Z" fill="#e2e8f0"/>
+              <!-- Nose cone -->
+              <path d="M50,10 C50,10 30,50 30,70 L70,70 C70,50 50,10 50,10 Z" fill="#ef4444"/>
+              <!-- Stripes -->
+              <rect x="30" y="70" width="40" height="20" fill="#1e293b"/>
+              <rect x="30" y="130" width="40" height="15" fill="#1e293b"/>
+              <!-- Window -->
+              <circle cx="50" cy="100" r="10" fill="#0a0e17" stroke="#334155" stroke-width="2"/>
+              <!-- Fins -->
+              <path d="M30,160 L5,210 L30,200 Z" fill="#ef4444"/>
+              <path d="M70,160 L95,210 L70,200 Z" fill="#ef4444"/>
+              <!-- Engine -->
+              <path d="M40,200 L60,200 L65,215 L35,215 Z" fill="#475569"/>
+            </svg>
+        </div>
+        <div class="intro-text" style="margin-top: 50px;">CLICK TO INITIATE MISSION</div>
+    </div>
+</div>
+
+<div class="dashboard">
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- 1. STATUS BAR                                                      -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div class="status-bar" style="position: relative; justify-content: center;">
+    <h1 style="position: absolute; left: 20px; color: var(--cyan); letter-spacing: 0.2em; font-weight: 900; font-size: 24px; text-shadow: 0 0 10px var(--cyan);">SLAYERS</h1>
+    <h1 style="text-align: center;">SPACECRAFT AUTONOMY <span>— MISSION CONTROL</span></h1>
+    <div class="indicators" style="position: absolute; right: 20px;">
+        <div class="ind"><div class="dot" id="dot-redis"></div>Redis</div>
+        <div class="ind"><div class="dot" id="dot-orch"></div>Orchestrator</div>
+        <div class="ind"><div class="dot" id="dot-ws"></div>WebSocket</div>
+        <div class="ind"><div class="dot" id="dot-scenario"></div>Scenario</div>
+        <div class="ind"><div class="dot" id="dot-model"></div>Model</div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- 2. VISUAL MONITORING ROW                                           -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div class="row-3">
+
+    <!-- ── Camera Feed ──────────────────────────────────────────── -->
+    <div class="panel glow-cyan">
+        <div class="panel-title"><span class="phase-badge phase-perc">CAM</span> Camera Feed</div>
+        <div class="camera-container" id="cam-wrapper">
+            <video id="cam-video" autoplay playsinline muted></video>
+            <canvas id="cam-canvas"></canvas>
+            <div class="scanline-overlay"></div>
+            <div class="cam-badge off" id="cam-badge">OFF</div>
+            <div class="cam-rec-dot" id="cam-time"></div>
+        </div>
+        <div class="cam-controls">
+            <button class="btn" id="btn-cam-toggle" onclick="toggleCamera()">▶ Start Camera</button>
+            <button class="btn primary" id="btn-capture" onclick="captureAndAnalyze()" disabled>⬡ Capture & Analyze</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+            <label style="font-family:var(--mono);font-size:10px;color:var(--muted);display:flex;align-items:center;gap:4px;">
+                <input type="checkbox" id="chk-auto" onchange="toggleAutoCapture()"> Auto-capture (3s)
+            </label>
+            <span class="model-badge not-loaded" id="model-badge">● Model: —</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+            <input type="file" id="file-upload" accept="image/*" onchange="uploadImage(event)" style="flex:1;">
+        </div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--dim);" id="cam-inference-time">Last inference: — ms</div>
+    </div>
+
+    <!-- ── Jensen Gain Gauge ────────────────────────────────────── -->
+    <div class="panel glow-cyan">
+        <div class="panel-title"><span class="phase-badge phase-perc">P1</span> Jensen Gain Gauge</div>
+        <div class="gauge-container">
+            <svg class="gauge-svg" viewBox="0 0 300 180" id="jg-gauge">
+                <defs>
+                    <linearGradient id="grd-green" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" stop-color="#10b981"/>
+                        <stop offset="100%" stop-color="#34d399"/>
+                    </linearGradient>
+                    <linearGradient id="grd-amber" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" stop-color="#f59e0b"/>
+                        <stop offset="100%" stop-color="#fbbf24"/>
+                    </linearGradient>
+                    <linearGradient id="grd-red" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" stop-color="#ef4444"/>
+                        <stop offset="100%" stop-color="#f87171"/>
+                    </linearGradient>
+                    <filter id="glow">
+                        <feGaussianBlur stdDeviation="3" result="blur"/>
+                        <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+                    </filter>
+                </defs>
+                <!-- Background arc -->
+                <path d="M 30 160 A 120 120 0 0 1 270 160" fill="none" stroke="#1e293b" stroke-width="18" stroke-linecap="round"/>
+                <!-- Green zone: 0-5° (0 to 30°) -->
+                <path d="M 30 160 A 120 120 0 0 1 270 160" fill="none" stroke="url(#grd-green)" stroke-width="14" stroke-linecap="round"
+                      stroke-dasharray="62.8 314" stroke-dashoffset="0" opacity="0.7"/>
+                <!-- Yellow zone: 5-15° -->
+                <path d="M 30 160 A 120 120 0 0 1 270 160" fill="none" stroke="url(#grd-amber)" stroke-width="14" stroke-linecap="round"
+                      stroke-dasharray="62.8 314" stroke-dashoffset="-62.8" opacity="0.7"/>
+                <!-- Red zone: 15-30° -->
+                <path d="M 30 160 A 120 120 0 0 1 270 160" fill="none" stroke="url(#grd-red)" stroke-width="14" stroke-linecap="round"
+                      stroke-dasharray="188.5 314" stroke-dashoffset="-125.7" opacity="0.7"/>
+                <!-- Tick marks -->
+                <g id="gauge-ticks" stroke="#475569" stroke-width="2">
+                    <line x1="150" y1="40" x2="150" y2="48" transform="rotate(-90 150 160)" />
+                    <line x1="150" y1="40" x2="150" y2="48" transform="rotate(-60 150 160)" />
+                    <line x1="150" y1="40" x2="150" y2="48" transform="rotate(-30 150 160)" />
+                    <line x1="150" y1="40" x2="150" y2="48" transform="rotate(0 150 160)" />
+                    <line x1="150" y1="40" x2="150" y2="48" transform="rotate(30 150 160)" />
+                    <line x1="150" y1="40" x2="150" y2="48" transform="rotate(60 150 160)" />
+                    <line x1="150" y1="40" x2="150" y2="48" transform="rotate(90 150 160)" />
+                </g>
+                <!-- Needle -->
+                <g id="gauge-needle" filter="url(#glow)" style="transform-origin: 150px 160px; transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);">
+                    <path d="M148,160 L150,50 L152,160 Z" fill="var(--cyan)" opacity="0.9"/>
+                    <circle cx="150" cy="160" r="8" fill="var(--cyan)"/>
+                    <circle cx="150" cy="160" r="3" fill="#0f172a"/>
+                </g>
+                <!-- Scale labels -->
+                <text x="25" y="175" fill="#64748b" font-size="10" font-family="JetBrains Mono, monospace">0°</text>
+                <text x="140" y="28" fill="#64748b" font-size="10" font-family="JetBrains Mono, monospace">15°</text>
+                <text x="265" y="175" fill="#64748b" font-size="10" font-family="JetBrains Mono, monospace">30°</text>
+            </svg>
+            <div class="gauge-value" id="jg-value">—°</div>
+            <div class="gauge-label">Jensen Gain</div>
+            <div class="gauge-conf">
+                <span class="tag green" id="jg-conf-tag">—</span>
+                <span id="jg-trust" style="font-family:var(--mono);font-size:11px;color:var(--muted);">—</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Approach Trajectory ──────────────────────────────────── -->
+    <div class="panel glow-cyan">
+        <div class="panel-title"><span class="phase-badge phase-perc">NAV</span> Approach Trajectory</div>
+        <div class="trajectory-container">
+            <canvas class="trajectory-canvas" id="traj-canvas" width="400" height="400"></canvas>
+            <div class="trajectory-overlay" id="traj-dist">Distance: — m</div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- 3. AGENT DATA ROW                                                  -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div class="row-3">
+    <!-- ── Perception ───────────────────────────────────────────── -->
+    <div class="panel agent-panel" id="panel-perc">
+        <div class="panel-title"><span class="phase-badge phase-perc">P1</span> Perception Agent</div>
+        <div id="perc-data" style="font-family:var(--mono);font-size:11px;color:var(--muted);">Awaiting telemetry…</div>
+    </div>
+    <!-- ── Cognition ────────────────────────────────────────────── -->
+    <div class="panel agent-panel" id="panel-cog">
+        <div class="panel-title"><span class="phase-badge phase-cog">P2</span> Cognition Agent · HDC</div>
+        <div id="cog-data" style="font-family:var(--mono);font-size:11px;color:var(--muted);">Awaiting telemetry…</div>
+    </div>
+    <!-- ── Action ───────────────────────────────────────────────── -->
+    <div class="panel agent-panel" id="panel-act">
+        <div class="panel-title"><span class="phase-badge phase-act">P3</span> Action Agent</div>
+        <div id="act-data" style="font-family:var(--mono);font-size:11px;color:var(--muted);">Awaiting telemetry…</div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- 4. CONTROL & DECISION ROW                                          -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div class="row-3">
+    <!-- ── Orchestrator ─────────────────────────────────────────── -->
+    <div class="panel agent-panel" id="panel-orch">
+        <div class="panel-title"><span class="phase-badge phase-orch">P5</span> Orchestrator Consensus</div>
+        <div id="orch-data" style="font-family:var(--mono);font-size:11px;color:var(--muted);">Awaiting consensus…</div>
+    </div>
+
+    <!-- ── Armstrong Override ───────────────────────────────────── -->
+    <div class="panel">
+        <div class="panel-title"><span class="phase-badge" style="background:var(--red-dim);color:var(--red);">OVR</span> Armstrong Protocol Override</div>
+        <div class="override-grid">
+            <button class="btn override-btn selected" onclick="setOverrideLevel('acknowledge', this)">L1 · Acknowledge</button>
+            <button class="btn override-btn" onclick="setOverrideLevel('modify', this)">L2 · Modify</button>
+            <button class="btn override-btn" onclick="setOverrideLevel('replace', this)">L3 · Replace</button>
+            <button class="btn override-btn danger" onclick="setOverrideLevel('reject', this)">L4 · Reject</button>
+        </div>
+        <select id="override-action" style="width:100%;margin-bottom:6px;">
+            <option value="hold_position">Hold Position</option>
+            <option value="proceed_slow">Proceed Slow</option>
+            <option value="proceed_normal">Proceed Normal</option>
+            <option value="abort">Abort</option>
+            <option value="reconfigure_power">Reconfigure Power</option>
+            <option value="isolate_module">Isolate Module</option>
+            <option value="emergency_vent">Emergency Vent</option>
+        </select>
+        <input type="text" id="override-rationale" placeholder="Rationale (required for L2–L4)" style="width:100%;margin-bottom:6px;">
+        <button class="btn danger" id="btn-override" onclick="sendOverride()" style="width:100%;">⚡ Execute Override</button>
+        <div id="override-status" style="font-size:10px;color:var(--dim);margin-top:4px;font-family:var(--mono);min-height:14px;"></div>
+    </div>
+
+    <!-- ── Chat ─────────────────────────────────────────────────── -->
+    <div class="panel">
+        <div class="panel-title"><span class="phase-badge" style="background:var(--cyan-dim);color:var(--cyan);">AI</span> Conversational AI</div>
+        <div id="chat-log"></div>
+        <input type="text" id="chat-input" placeholder="status report · explain · options…" autocomplete="off" style="width:100%;">
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- 5. CONTROLS BAR                                                    -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div class="controls-bar">
+    <span class="ctrl-label">System</span>
+    <div class="ctrl-group">
+        <button class="btn success" id="btn-start" onclick="startOrch()">▶ Start Orchestrator</button>
+        <button class="btn danger" id="btn-stop" onclick="stopOrch()" disabled>■ Stop</button>
+    </div>
+    <div class="ctrl-sep"></div>
+    <span class="ctrl-label">Scenario</span>
+    <div class="ctrl-group">
+        <select id="scenario-select">
+            <option value="nominal">Nominal Docking</option>
+            <option value="thermal">Thermal Anomaly</option>
+            <option value="perception">Perception Challenge</option>
+            <option value="perfect_storm">Perfect Storm</option>
+        </select>
+        <button class="btn" id="btn-scenario" onclick="runScenario()">Run</button>
+    </div>
+    <div class="ctrl-sep"></div>
+    <span class="ctrl-label">Inject</span>
+    <div class="ctrl-group">
+        <button class="btn" onclick="injectPerception()">⊕ Perception</button>
+        <button class="btn" onclick="injectCognition()">⊕ Cognition</button>
+    </div>
+    <div class="ctrl-sep"></div>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:10px;">
+        <span class="ctrl-label" id="stat-events-label">Events: <span id="stat-events" style="color:var(--text);">0</span></span>
+        <span class="ctrl-label">Decisions: <span id="stat-decisions" style="color:var(--text);">0</span></span>
+        <span class="ctrl-label">Scenario: <span id="stat-scenario" style="color:var(--text);">—</span></span>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- 6. EVENT LOG                                                       -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<div class="panel" style="margin-bottom:16px;">
+    <div class="panel-title">Event Log · Real-time Redis Messages</div>
+    <div id="event-log"></div>
+</div>
+
+<footer style="text-align:center; padding: 20px; font-family:var(--mono); font-size: 11px; color: var(--muted); border-top: 1px solid var(--border); margin-top: 40px;">
+    © 2026 ORCHESTRATOR SYSTEM · BY TEAM SLAYERS <span style="color: var(--red); font-size: 14px; text-shadow: 0 0 10px rgba(255,0,85,0.8); margin-left: 4px;">♥</span>
+</footer>
+
+</div><!-- /.dashboard -->
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- JAVASCRIPT                                                         -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<script>
+// ═══════════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════════
+let ws = null;
+let wsConnected = false;
+let overrideLevel = "acknowledge";
+let cameraStream = null;
+let autoCapInterval = null;
+let trajectoryTrail = [];
+const MAX_TRAIL = 50;
+let lastJG = 0;
+let eventCount = 0;
+
+// ═══════════════════════════════════════════════════════════════════════
+// WEBSOCKET
+// ═══════════════════════════════════════════════════════════════════════
+function connectWS() {
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+    ws.onopen = () => {
+        wsConnected = true;
+        updateDot("dot-ws", "on");
+        addLog("SYSTEM", "WebSocket connected");
+    };
+
+    ws.onclose = () => {
+        wsConnected = false;
+        updateDot("dot-ws", "off");
+        addLog("SYSTEM", "WebSocket disconnected — reconnecting in 3s…");
+        setTimeout(connectWS, 3000);
+    };
+
+    ws.onerror = () => {
+        wsConnected = false;
+        updateDot("dot-ws", "off");
+    };
+
+    ws.onmessage = (e) => {
+        try {
+            const msg = JSON.parse(e.data);
+            handleMessage(msg);
+        } catch (err) {
+            console.warn("WS parse error:", err);
+        }
+    };
+}
+
+// Keep-alive ping every 30s
+setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "ping" }));
+    }
+}, 30000);
+
+// ═══════════════════════════════════════════════════════════════════════
+// MESSAGE HANDLER
+// ═══════════════════════════════════════════════════════════════════════
+function handleMessage(msg) {
+    if (msg.type === "initial_state") {
+        updateIndicators(msg.status);
+        if (msg.latest) updateAllPanels(msg.latest);
+        if (msg.event_log) {
+            msg.event_log.forEach(ev => addLogEntry(ev));
+        }
+        if (msg.status && msg.status.modules) updateModules(msg.status.modules);
+    }
+    else if (msg.type === "redis_message") {
+        const ch = msg.channel;
+        const d = msg.data;
+        if (ch === "perception.out") updatePerception(d);
+        else if (ch === "cognition.out") updateCognition(d);
+        else if (ch === "action.out") updateAction(d);
+        else if (ch === "orchestrator.consensus") updateOrchestrator(d);
+        addLog(ch, summarize(ch, d));
+    }
+    else if (msg.type === "system_event") {
+        addLog("SYSTEM", msg.event + (msg.scenario ? ` [${msg.scenario}]` : "") + (msg.message ? `: ${msg.message}` : ""));
+
+        if (msg.event === "orchestrator_started") {
+            updateDot("dot-orch", "on");
+            document.getElementById("btn-start").disabled = true;
+            document.getElementById("btn-stop").disabled = false;
+        }
+        if (msg.event === "orchestrator_stopped") {
+            updateDot("dot-orch", "off");
+            document.getElementById("btn-start").disabled = false;
+            document.getElementById("btn-stop").disabled = true;
+        }
+        if (msg.event === "redis_connected") updateDot("dot-redis", "on");
+        if (msg.event === "redis_error") updateDot("dot-redis", "off");
+        if (msg.event === "scenario_started") {
+            updateDot("dot-scenario", "on");
+            document.getElementById("btn-scenario").disabled = true;
+            document.getElementById("stat-scenario").textContent = msg.scenario || "running";
+        }
+        if (msg.event === "scenario_complete" || msg.event === "scenario_error") {
+            updateDot("dot-scenario", "off");
+            document.getElementById("btn-scenario").disabled = false;
+            document.getElementById("stat-scenario").textContent = "—";
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// PANEL UPDATE FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════
+function updateAllPanels(latest) {
+    if (latest.perception) updatePerception(latest.perception);
+    if (latest.cognition) updateCognition(latest.cognition);
+    if (latest.action) updateAction(latest.action);
+    if (latest.consensus) updateOrchestrator(latest.consensus);
+}
+
+function fmtNum(v, decimals = 2) {
+    return typeof v === "number" ? v.toFixed(decimals) : String(v ?? "—");
+}
+
+// ── Perception ─────────────────────────────────────────────────────
+function updatePerception(d) {
+    const jg = d.jensen_gain;
+    const conf = d.confidence_level ?? "—";
+    const trust = d.is_trustworthy;
+    const pos = d.t || [0, 0, 0];
+    const sigR = d.sigma_R_deg;
+    const sigT = d.sigma_t_m;
+    const procTime = d.processing_time_ms;
+
+    let confTag = "green";
+    if (conf === "moderate") confTag = "amber";
+    if (conf === "low") confTag = "red";
+
+    // Update gauge
+    updateGauge(jg, conf, trust);
+
+    // Update trajectory
+    if (d.t) {
+        trajectoryTrail.push([...d.t]);
+        if (trajectoryTrail.length > MAX_TRAIL) trajectoryTrail.shift();
+        drawTrajectory();
+    }
+
+    // Activate panel border
+    const panel = document.getElementById("panel-perc");
+    panel.classList.add("active-perc");
+
+    document.getElementById("perc-data").innerHTML = `
+        <div class="data-row"><span class="lbl">Jensen Gain</span><span class="val">${fmtNum(jg)}°</span></div>
+        <div class="data-row"><span class="lbl">Confidence</span><span class="val"><span class="tag ${confTag}">${conf}</span></span></div>
+        <div class="data-row"><span class="lbl">Trustworthy</span><span class="val" style="color:${trust ? 'var(--green)' : 'var(--red)'}">${trust ? '✓ YES' : '✗ NO'}</span></div>
+        <div class="data-row"><span class="lbl">Position</span><span class="val">[${pos.map(v => fmtNum(v, 1)).join(', ')}]</span></div>
+        <div class="data-row"><span class="lbl">σ_R</span><span class="val">${fmtNum(sigR)}°</span></div>
+        <div class="data-row"><span class="lbl">σ_t</span><span class="val">${fmtNum(sigT)} m</span></div>
+        <div class="data-row"><span class="lbl">Proc. Time</span><span class="val">${procTime ?? '—'} ms</span></div>
+    `;
+}
+
+// ── Cognition ──────────────────────────────────────────────────────
+function updateCognition(d) {
+    const anom = d.anomaly_detected;
+    const anomType = d.anomaly_type ?? "none";
+    const sev = d.anomaly_severity ?? "nominal";
+    const novelty = d.novelty_score ?? 0;
+    const rec = d.recommended_action ?? "—";
+    const conf = d.action_confidence ?? 0;
+    const expl = d.explanation ?? "";
+    const similar = d.similar_case_id ?? "";
+
+    let sevTag = "green";
+    if (sev === "critical" || sev === "failed") sevTag = "red";
+    else if (sev === "degraded") sevTag = "amber";
+
+    const panel = document.getElementById("panel-cog");
+    panel.classList.add("active-cog");
+
+    document.getElementById("cog-data").innerHTML = `
+        <div class="data-row"><span class="lbl">Anomaly</span><span class="val">${anom ? '<span class="tag red">DETECTED</span>' : '<span class="tag green">CLEAR</span>'}</span></div>
+        <div class="data-row"><span class="lbl">Type</span><span class="val">${anomType}</span></div>
+        <div class="data-row"><span class="lbl">Severity</span><span class="val"><span class="tag ${sevTag}">${sev}</span></span></div>
+        <div class="data-row"><span class="lbl">Novelty</span><span class="val">${fmtNum(novelty)}</span></div>
+        <div class="data-row"><span class="lbl">Recommendation</span><span class="val" style="color:var(--amber)">${rec}</span></div>
+        <div class="data-row"><span class="lbl">Confidence</span><span class="val">${typeof conf === 'number' ? (conf * 100).toFixed(0) : conf}%</span></div>
+        ${similar ? `<div class="data-row"><span class="lbl">Similar Case</span><span class="val">${similar}</span></div>` : ''}
+        <div style="margin-top:6px;font-size:10px;color:var(--dim);word-break:break-word;max-height:50px;overflow-y:auto;">${expl}</div>
+    `;
+}
+
+// ── Action ─────────────────────────────────────────────────────────
+function updateAction(d) {
+    const act = d.primary_action ?? "—";
+    const score = d.primary_score ?? 0;
+    const coll = d.collision_prob ?? 0;
+    const success = d.mission_success_prob ?? 0;
+    const mc = d.mc_runs ?? 0;
+    const horizon = d.simulation_horizon_s ?? 0;
+    const alts = d.alternatives || [];
+
+    let actTag = "green";
+    if (act === "abort" || act === "emergency_vent") actTag = "red";
+    else if (act === "hold_position" || act === "await_human") actTag = "amber";
+
+    const panel = document.getElementById("panel-act");
+    panel.classList.add("active-act");
+
+    let altHTML = alts.map(a =>
+        `<div class="data-row"><span class="lbl" style="padding-left:8px;">↳ ${a.action}</span><span class="val">${fmtNum(a.score)}</span></div>`
+    ).join("");
+
+    document.getElementById("act-data").innerHTML = `
+        <div class="data-row"><span class="lbl">Action</span><span class="val"><span class="tag ${actTag}">${act}</span></span></div>
+        <div class="data-row"><span class="lbl">Score</span><span class="val">${fmtNum(score)}</span></div>
+        <div class="data-row"><span class="lbl">Collision Prob</span><span class="val" style="color:${coll > 0.3 ? 'var(--red)' : coll > 0.1 ? 'var(--amber)' : 'var(--green)'}">${(coll * 100).toFixed(1)}%</span></div>
+        <div class="data-row"><span class="lbl">Success Prob</span><span class="val" style="color:${success > 0.8 ? 'var(--green)' : success > 0.5 ? 'var(--amber)' : 'var(--red)'}">${(success * 100).toFixed(1)}%</span></div>
+        <div class="data-row"><span class="lbl">MC Runs</span><span class="val">${mc}</span></div>
+        <div class="data-row"><span class="lbl">Horizon</span><span class="val">${horizon}s</span></div>
+        ${alts.length ? '<div style="margin-top:4px;font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:0.06em;">Alternatives</div>' : ''}
+        ${altHTML}
+    `;
+}
+
+// ── Orchestrator ───────────────────────────────────────────────────
+function updateOrchestrator(d) {
+    const act = d.final_action ?? "—";
+    const cons = d.consensus_reached;
+    const votes = d.votes || {};
+    const override = d.override_applied;
+    const overLvl = d.override_level ?? "";
+    const escalated = d.escalated_to_human;
+    const reasoning = d.reasoning ?? "";
+    const fallback = d.fallback_triggered;
+
+    let actTag = "green";
+    if (act === "abort" || act === "emergency_vent") actTag = "red";
+    else if (act === "hold_position" || act === "await_human") actTag = "amber";
+
+    const voteStr = Object.entries(votes).map(([k, v]) => `${k}=${v}`).join(" · ");
+
+    const panel = document.getElementById("panel-orch");
+    panel.classList.add("active-orch");
+
+    document.getElementById("orch-data").innerHTML = `
+        <div class="data-row"><span class="lbl">Final Action</span><span class="val"><span class="tag ${actTag}">${act}</span></span></div>
+        <div class="data-row"><span class="lbl">Consensus</span><span class="val">${cons ? '<span class="tag green">✓ REACHED</span>' : '<span class="tag amber">✗ CONFLICT</span>'}</span></div>
+        <div class="data-row"><span class="lbl">Votes</span><span class="val" style="font-size:10px;max-width:180px;word-break:break-word;">${voteStr || '—'}</span></div>
+        <div class="data-row"><span class="lbl">Override</span><span class="val">${override ? '<span class="tag red">YES · L' + overLvl + '</span>' : '<span style="color:var(--dim)">No</span>'}</span></div>
+        <div class="data-row"><span class="lbl">Escalated</span><span class="val">${escalated ? '<span class="tag amber">⚠ YES</span>' : '<span style="color:var(--dim)">No</span>'}</span></div>
+        <div class="data-row"><span class="lbl">Fallback</span><span class="val">${fallback ? '<span class="tag red">YES</span>' : '<span style="color:var(--dim)">No</span>'}</span></div>
+        <div style="margin-top:6px;font-size:10px;color:var(--dim);word-break:break-word;max-height:48px;overflow-y:auto;line-height:1.4;">${reasoning}</div>
+    `;
+
+    fetchStatus();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// JENSEN GAIN GAUGE
+// ═══════════════════════════════════════════════════════════════════════
+function updateGauge(jg, conf, trust) {
+    const val = typeof jg === "number" ? jg : 0;
+    lastJG = val;
+
+    // Needle rotation: 0° → -90deg (left), 30° → +90deg (right)
+    const angle = -90 + (Math.min(val, 30) / 30) * 180;
+    const needle = document.getElementById("gauge-needle");
+    needle.style.transform = `rotate(${angle}deg)`;
+
+    // Color the value
+    const valEl = document.getElementById("jg-value");
+    valEl.textContent = fmtNum(val) + "°";
+    if (val <= 5) { valEl.style.color = "var(--green)"; valEl.style.textShadow = "0 0 20px rgba(16,185,129,0.4)"; }
+    else if (val <= 15) { valEl.style.color = "var(--amber)"; valEl.style.textShadow = "0 0 20px rgba(245,158,11,0.4)"; }
+    else { valEl.style.color = "var(--red)"; valEl.style.textShadow = "0 0 20px rgba(239,68,68,0.4)"; }
+
+    // Confidence tag
+    const confEl = document.getElementById("jg-conf-tag");
+    confEl.textContent = (conf ?? "—").toUpperCase();
+    confEl.className = "tag " + (conf === "high" ? "green" : conf === "moderate" ? "amber" : conf === "low" ? "red" : "cyan");
+
+    // Trust indicator
+    const trustEl = document.getElementById("jg-trust");
+    if (trust === true) { trustEl.innerHTML = '<span style="color:var(--green)">✓ Trustworthy</span>'; }
+    else if (trust === false) { trustEl.innerHTML = '<span style="color:var(--red)">✗ Untrustworthy</span>'; }
+    else { trustEl.textContent = "—"; }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TRAJECTORY CANVAS
+// ═══════════════════════════════════════════════════════════════════════
+function drawTrajectory() {
+    const canvas = document.getElementById("traj-canvas");
+    const ctx = canvas.getContext("2d");
+    const W = canvas.width;
+    const H = canvas.height;
+    const cx = W / 2;
+    const cy = H / 2;
+    const scale = W / 40; // ±20m maps to full canvas
+
+    ctx.clearRect(0, 0, W, H);
+
+    // Background
+    ctx.fillStyle = "#060a10";
+    ctx.fillRect(0, 0, W, H);
+
+    // Grid
+    ctx.strokeStyle = "rgba(30, 41, 59, 0.6)";
+    ctx.lineWidth = 0.5;
+    for (let i = -20; i <= 20; i += 5) {
+        const px = cx + i * scale;
+        const py = cy - i * scale;
+        ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(W, py); ctx.stroke();
+    }
+
+    // Axis labels
+    ctx.fillStyle = "#334155";
+    ctx.font = "9px 'JetBrains Mono', monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("X", W - 10, cy - 4);
+    ctx.fillText("Y", cx + 10, 12);
+
+    // Keepout zone (10m radius, dashed red circle)
+    ctx.setLineDash([6, 4]);
+    ctx.strokeStyle = "rgba(239, 68, 68, 0.4)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 10 * scale, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Keepout label
+    ctx.fillStyle = "rgba(239, 68, 68, 0.3)";
+    ctx.font = "8px 'JetBrains Mono', monospace";
+    ctx.fillText("KEEPOUT 10m", cx, cy - 10 * scale - 6);
+
+    // Target station at center
+    ctx.save();
+    ctx.translate(cx, cy);
+    // Draw a small station icon (cross + circle)
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(-8, 0); ctx.lineTo(8, 0); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, -8); ctx.lineTo(0, 8); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI * 2); ctx.stroke();
+    // Solar panels
+    ctx.fillStyle = "rgba(0, 212, 255, 0.15)";
+    ctx.fillRect(-18, -3, 10, 6);
+    ctx.fillRect(8, -3, 10, 6);
+    ctx.strokeStyle = "rgba(0, 212, 255, 0.3)";
+    ctx.strokeRect(-18, -3, 10, 6);
+    ctx.strokeRect(8, -3, 10, 6);
+    ctx.restore();
+
+    // Trail
+    for (let i = 0; i < trajectoryTrail.length; i++) {
+        const p = trajectoryTrail[i];
+        const px = cx + p[0] * scale;
+        const py = cy - p[1] * scale; // Y inverted for screen coords
+        const alpha = 0.1 + (i / trajectoryTrail.length) * 0.7;
+        const radius = 1.5 + (i / trajectoryTrail.length) * 2;
+
+        ctx.beginPath();
+        ctx.arc(px, py, radius, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(0, 212, 255, ${alpha})`;
+        ctx.fill();
+
+        // Line connecting trail dots
+        if (i > 0) {
+            const prev = trajectoryTrail[i - 1];
+            ctx.beginPath();
+            ctx.moveTo(cx + prev[0] * scale, cy - prev[1] * scale);
+            ctx.lineTo(px, py);
+            ctx.strokeStyle = `rgba(0, 212, 255, ${alpha * 0.4})`;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+    }
+
+    // Current position (last in trail)
+    if (trajectoryTrail.length > 0) {
+        const cur = trajectoryTrail[trajectoryTrail.length - 1];
+        const px = cx + cur[0] * scale;
+        const py = cy - cur[1] * scale;
+
+        // Glow
+        const grad = ctx.createRadialGradient(px, py, 0, px, py, 12);
+        grad.addColorStop(0, "rgba(0, 212, 255, 0.5)");
+        grad.addColorStop(1, "rgba(0, 212, 255, 0)");
+        ctx.beginPath(); ctx.arc(px, py, 12, 0, Math.PI * 2);
+        ctx.fillStyle = grad; ctx.fill();
+
+        // Dot
+        ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2);
+        ctx.fillStyle = "#00d4ff"; ctx.fill();
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // Distance readout
+        const dist = Math.sqrt(cur[0] * cur[0] + cur[1] * cur[1] + (cur[2] || 0) * (cur[2] || 0));
+        document.getElementById("traj-dist").textContent = `Distance: ${dist.toFixed(2)} m`;
+    }
+}
+
+// Initial draw
+drawTrajectory();
+
+// ═══════════════════════════════════════════════════════════════════════
+// CAMERA
+// ═══════════════════════════════════════════════════════════════════════
+async function toggleCamera() {
+    const video = document.getElementById("cam-video");
+    const btn = document.getElementById("btn-cam-toggle");
+    const badge = document.getElementById("cam-badge");
+    const captureBtn = document.getElementById("btn-capture");
+
+    if (cameraStream) {
+        // Stop
+        cameraStream.getTracks().forEach(t => t.stop());
+        cameraStream = null;
+        video.srcObject = null;
+        btn.textContent = "▶ Start Camera";
+        badge.className = "cam-badge off";
+        badge.textContent = "OFF";
+        captureBtn.disabled = true;
+        if (autoCapInterval) { clearInterval(autoCapInterval); autoCapInterval = null; }
+        document.getElementById("chk-auto").checked = false;
+    } else {
+        // Start
+        try {
+            cameraStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+            video.srcObject = cameraStream;
+            btn.textContent = "■ Stop Camera";
+            badge.className = "cam-badge live";
+            badge.textContent = "● LIVE";
+            captureBtn.disabled = false;
+        } catch (err) {
+            addLog("SYSTEM", "Camera error: " + err.message);
+        }
+    }
+}
+
+async function captureAndAnalyze() {
+    const video = document.getElementById("cam-video");
+    const canvas = document.getElementById("cam-canvas");
+    if (!cameraStream) return;
+
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0);
+
+    const base64 = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
+    await sendFrameToAPI(base64);
+}
+
+async function sendFrameToAPI(base64Data) {
+    const timeEl = document.getElementById("cam-inference-time");
+    timeEl.textContent = "Analyzing…";
+    const t0 = performance.now();
+
+    try {
+        const r = await fetch("/api/perception/frame", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ image: base64Data })
+        });
+        const d = await r.json();
+        const dt = (performance.now() - t0).toFixed(0);
+        timeEl.textContent = `Last inference: ${dt} ms`;
+        if (d.error) {
+            addLog("SYSTEM", "Frame analysis error: " + d.error);
+        } else {
+            addLog("SYSTEM", `Frame analyzed (${dt}ms)`);
+        }
+    } catch (err) {
+        timeEl.textContent = "Inference failed";
+        addLog("SYSTEM", "Frame POST failed: " + err.message);
+    }
+}
+
+function toggleAutoCapture() {
+    const checked = document.getElementById("chk-auto").checked;
+    if (checked && cameraStream) {
+        autoCapInterval = setInterval(captureAndAnalyze, 3000);
+        addLog("SYSTEM", "Auto-capture enabled (3s interval)");
+    } else {
+        if (autoCapInterval) { clearInterval(autoCapInterval); autoCapInterval = null; }
+    }
+}
+
+async function uploadImage(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        const base64 = e.target.result.split(",")[1];
+        await sendFrameToAPI(base64);
+    };
+    reader.readAsDataURL(file);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// MODEL STATUS
+// ═══════════════════════════════════════════════════════════════════════
+async function checkModelStatus() {
+    try {
+        const r = await fetch("/api/model/status");
+        const d = await r.json();
+        const badge = document.getElementById("model-badge");
+        const dot = document.getElementById("dot-model");
+        if (d.loaded) {
+            badge.className = "model-badge loaded";
+            badge.textContent = "● Model: Loaded";
+            updateDot("dot-model", "on");
+        } else {
+            badge.className = "model-badge not-loaded";
+            badge.textContent = "● Model: Not Loaded";
+            updateDot("dot-model", "off");
+        }
+    } catch (e) {
+        // Silently fail
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// INDICATORS
+// ═══════════════════════════════════════════════════════════════════════
+function updateDot(id, state) {
+    const el = document.getElementById(id);
+    if (el) el.className = "dot " + state;
+}
+
+function updateIndicators(status) {
+    updateDot("dot-redis", status.redis_connected ? "on" : "off");
+    updateDot("dot-orch", status.orchestrator_running ? "on" : "off");
+    updateDot("dot-scenario", status.scenario_running ? "on" : "off");
+
+    if (status.orchestrator_running) {
+        document.getElementById("btn-start").disabled = true;
+        document.getElementById("btn-stop").disabled = false;
+    }
+}
+
+function updateModules(mods) {
+    // No dedicated module panel in this layout, but keep the logic
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// EVENT LOG
+// ═══════════════════════════════════════════════════════════════════════
+function addLog(channel, text) {
+    addLogEntry({
+        time: new Date().toLocaleTimeString("en-GB", { hour12: false }),
+        channel: channel,
+        summary: text
+    });
+}
+
+function addLogEntry(entry) {
+    const el = document.getElementById("event-log");
+    const chClass = getChannelClass(entry.channel);
+    const div = document.createElement("div");
+    div.className = "log-entry";
+    div.innerHTML = `<span class="log-time">${entry.time}</span> <span class="log-ch ${chClass}">[${entry.channel}]</span> ${entry.summary}`;
+    el.appendChild(div);
+    el.scrollTop = el.scrollHeight;
+
+    while (el.children.length > 500) el.removeChild(el.firstChild);
+
+    eventCount++;
+    document.getElementById("stat-events").textContent = eventCount;
+}
+
+function getChannelClass(ch) {
+    if (ch.startsWith("perception")) return "perception";
+    if (ch.startsWith("cognition")) return "cognition";
+    if (ch.startsWith("action")) return "action";
+    if (ch.startsWith("orchestrator")) return "orchestrator";
+    if (ch.startsWith("human")) return "human";
+    return "system";
+}
+
+function summarize(ch, d) {
+    try {
+        if (ch === "perception.out") {
+            return `JG=${fmtNum(d.jensen_gain)}° conf=${d.confidence_level} trust=${d.is_trustworthy ? '✓' : '✗'}`;
+        }
+        if (ch === "cognition.out") {
+            return `${d.anomaly_detected ? '⚠ ANOMALY' : '● nominal'} → ${d.recommended_action}`;
+        }
+        if (ch === "action.out") {
+            return `${d.primary_action} score=${fmtNum(d.primary_score)} coll=${(d.collision_prob * 100).toFixed(0)}%`;
+        }
+        if (ch === "orchestrator.consensus") {
+            return `→ ${d.final_action} consensus=${d.consensus_reached ? '✓' : '✗'}`;
+        }
+        if (ch === "orchestrator.escalation") {
+            return `⚠ ESCALATION: ${(d.reason || '').substring(0, 60)}`;
+        }
+    } catch (e) { }
+    return JSON.stringify(d).substring(0, 80);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// API CALLS
+// ═══════════════════════════════════════════════════════════════════════
+async function fetchStatus() {
+    try {
+        const r = await fetch("/api/status");
+        const d = await r.json();
+        document.getElementById("stat-decisions").textContent = d.decision_count || 0;
+    } catch (e) { }
+}
+
+async function startOrch() {
+    const btn = document.getElementById("btn-start");
+    btn.disabled = true;
+    btn.textContent = "Starting…";
+    try {
+        const r = await fetch("/api/orchestrator/start", { method: "POST" });
+        const d = await r.json();
+        if (d.error) {
+            addLog("SYSTEM", "Error: " + d.error);
+            btn.disabled = false;
+        } else {
+            updateDot("dot-orch", "on");
+            document.getElementById("btn-stop").disabled = false;
+        }
+    } catch (e) {
+        addLog("SYSTEM", "Failed to start: " + e.message);
+        btn.disabled = false;
+    }
+    btn.textContent = "▶ Start Orchestrator";
+}
+
+async function stopOrch() {
+    try {
+        await fetch("/api/orchestrator/stop", { method: "POST" });
+        updateDot("dot-orch", "off");
+        document.getElementById("btn-start").disabled = false;
+        document.getElementById("btn-stop").disabled = true;
+    } catch (e) {
+        addLog("SYSTEM", "Failed to stop: " + e.message);
+    }
+}
+
+async function runScenario() {
+    const name = document.getElementById("scenario-select").value;
+    const btn = document.getElementById("btn-scenario");
+    btn.disabled = true;
+    try {
+        const r = await fetch(`/api/scenario/${name}`, { method: "POST" });
+        const d = await r.json();
+        if (d.error) {
+            addLog("SYSTEM", "Scenario error: " + d.error);
+            btn.disabled = false;
+        } else {
+            updateDot("dot-scenario", "on");
+            document.getElementById("stat-scenario").textContent = name;
+        }
+    } catch (e) {
+        addLog("SYSTEM", "Scenario failed: " + e.message);
+        btn.disabled = false;
+    }
+}
+
+async function injectPerception() {
+    try {
+        const r = await fetch("/api/inject/perception", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jensen_gain: 2.5, confidence: "moderate", distance: 10.0 })
+        });
+        const d = await r.json();
+        if (d.error) addLog("SYSTEM", "Inject error: " + d.error);
+        else addLog("SYSTEM", "Perception frame injected (JG=2.5°)");
+    } catch (e) { addLog("SYSTEM", "Inject failed: " + e.message); }
+}
+
+async function injectCognition() {
+    try {
+        const r = await fetch("/api/inject/cognition", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ anomaly: false, recommended_action: "proceed_slow" })
+        });
+        const d = await r.json();
+        if (d.error) addLog("SYSTEM", "Inject error: " + d.error);
+        else addLog("SYSTEM", "Cognition state injected (nominal)");
+    } catch (e) { addLog("SYSTEM", "Inject failed: " + e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// OVERRIDE
+// ═══════════════════════════════════════════════════════════════════════
+function setOverrideLevel(level, btnEl) {
+    overrideLevel = level;
+    document.querySelectorAll(".override-btn").forEach(b => b.classList.remove("selected"));
+    if (btnEl) btnEl.classList.add("selected");
+}
+
+async function sendOverride() {
+    const action = document.getElementById("override-action").value;
+    const rationale = document.getElementById("override-rationale").value;
+    const statusEl = document.getElementById("override-status");
+
+    if (overrideLevel !== "acknowledge" && !rationale.trim()) {
+        statusEl.textContent = "⚠ Rationale required for L2–L4";
+        statusEl.style.color = "var(--red)";
+        return;
+    }
+
+    try {
+        const r = await fetch("/api/override", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                level: overrideLevel,
+                action: action,
+                rationale: rationale,
+                operator: "commander"
+            })
+        });
+        const d = await r.json();
+        if (d.error) {
+            statusEl.textContent = "✗ " + d.error;
+            statusEl.style.color = "var(--red)";
+        } else {
+            statusEl.textContent = `✓ Override: ${overrideLevel.toUpperCase()} → ${action}`;
+            statusEl.style.color = "var(--green)";
+            document.getElementById("override-rationale").value = "";
+        }
+    } catch (e) {
+        statusEl.textContent = "✗ " + e.message;
+        statusEl.style.color = "var(--red)";
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// CHAT
+// ═══════════════════════════════════════════════════════════════════════
+document.getElementById("chat-input").addEventListener("keydown", async (e) => {
+    if (e.key !== "Enter") return;
+    const text = e.target.value.trim();
+    if (!text) return;
+    e.target.value = "";
+
+    addChatMsg("YOU", text, "");
+
+    try {
+        const r = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: text })
+        });
+        const d = await r.json();
+        addChatMsg("ORBITAL", d.response, d.route);
+    } catch (err) {
+        addChatMsg("ERROR", err.message, "error");
+    }
+});
+
+function addChatMsg(sender, text, route) {
+    const el = document.getElementById("chat-log");
+    const div = document.createElement("div");
+    div.className = "chat-msg " + (sender === "YOU" ? "user" : "system");
+    const routeTag = route ? ` <span class="chat-route">[${route}]</span>` : "";
+    div.innerHTML = `<strong>${sender}:</strong>${routeTag} ${text.replace(/\n/g, "<br>")}`;
+    el.appendChild(div);
+    el.scrollTop = el.scrollHeight;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// CAMERA TIMESTAMP
+// ═══════════════════════════════════════════════════════════════════════
+setInterval(() => {
+    const el = document.getElementById("cam-time");
+    if (cameraStream) {
+        const now = new Date();
+        el.textContent = now.toLocaleTimeString("en-GB", { hour12: false }) + "." + String(now.getMilliseconds()).padStart(3, "0");
+    } else {
+        el.textContent = "";
+    }
+}, 100);
+
+// ═══════════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════════
+connectWS();
+fetchStatus();
+checkModelStatus();
+setInterval(fetchStatus, 5000);
+setInterval(checkModelStatus, 10000);
+
+// ═══════════════════════════════════════════════════════════════════════
+// ROCKET INTRO ANIMATION
+// ═══════════════════════════════════════════════════════════════════════
+let hasLaunched = false;
+function launchRocket() {
+    if (hasLaunched) return;
+    hasLaunched = true;
+    
+    const rocketCont = document.getElementById("intro-rocket");
+    const rocketSvg = document.getElementById("rocket-svg");
+    const overlay = document.getElementById("intro-overlay");
+    const flame = document.getElementById("flame");
+    
+    document.querySelector(".intro-text").style.opacity = "0";
+    
+    flame.setAttribute("opacity", "1");
+    const flicker = setInterval(() => {
+        flame.setAttribute("opacity", Math.random() * 0.5 + 0.5);
+    }, 50);
+
+    rocketSvg.classList.add("vibrate");
+    
+    let smokeInterval = setInterval(() => {
+        const p = document.createElement("div");
+        p.className = "smoke-particle";
+        const size = Math.random() * 60 + 40;
+        p.style.width = size + "px";
+        p.style.height = size + "px";
+        const dx = (Math.random() - 0.5) * 300 + "px";
+        const dy = (Math.random() * 150) + "px";
+        const scale = Math.random() * 3 + 2;
+        p.style.setProperty("--dx", dx);
+        p.style.setProperty("--dy", dy);
+        p.style.setProperty("--scale", scale);
+        p.style.animation = `puff ${Math.random() * 0.5 + 1}s ease-out forwards`;
+        rocketCont.appendChild(p);
+        setTimeout(() => p.remove(), 2000);
+    }, 30);
+
+    setTimeout(() => {
+        rocketSvg.classList.remove("vibrate");
+        rocketCont.classList.add("launch");
+        setTimeout(() => {
+            clearInterval(smokeInterval);
+            clearInterval(flicker);
+            overlay.style.opacity = "0";
+            setTimeout(() => overlay.remove(), 1000);
+        }, 800);
+    }, 1500);
+}
+</script>
+
+<script src="https://cdn.botpress.cloud/webchat/v3.6/inject.js"></script>
+<script src="https://files.bpcontent.cloud/2026/06/09/18/20260609182037-6XDT8UJJ.js" defer></script>
+
+</body>
+</html>
