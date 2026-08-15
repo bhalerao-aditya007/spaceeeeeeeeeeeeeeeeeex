@@ -1,4 +1,12 @@
 steps:
+- name: 'gcr.io/cloud-builders/git'
+  entrypoint: 'bash'
+  args:
+    - '-c'
+    - |
+      apt-get update && apt-get install -y git-lfs
+      git lfs install
+      git lfs pull || echo "WARNING: git lfs pull failed — best.pt may still be a pointer file; the runtime guard in interface/app.py will refuse to load it silently."
 - name: 'gcr.io/cloud-builders/docker'
   args: ['build', '--no-cache', '-t', 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/spacecraft-autonomy:latest', '.']
 options:
