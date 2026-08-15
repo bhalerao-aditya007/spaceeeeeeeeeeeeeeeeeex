@@ -1,4 +1,4 @@
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict, field, fields
 from typing import Optional
 from enum import Enum
 import json
@@ -15,24 +15,13 @@ class AgentID(str, Enum):
 
 
 class MessageType(str, Enum):
-    # Perception outputs
     POSE_ESTIMATE       = "pose_estimate"
-    
-    # Cognition outputs
     SITUATION_VECTOR    = "situation_vector"
     ANOMALY_DETECTED    = "anomaly_detected"
-    
-    # Action outputs
     ACTION_RECOMMENDATION = "action_recommendation"
-    
-    # Interface outputs
     DISPLAY_UPDATE      = "display_update"
-    
-    # Human inputs
     HUMAN_OVERRIDE      = "human_override"
     HUMAN_ACKNOWLEDGE   = "human_acknowledge"
-    
-    # Orchestrator
     CONSENSUS_ACTION    = "consensus_action"
     ESCALATION          = "escalation"
     HEARTBEAT           = "heartbeat"
@@ -47,27 +36,22 @@ class ConfidenceLevel(str, Enum):
 
 
 class ActionType(str, Enum):
-    # Pose/docking related
     ABORT           = "abort"
     HOLD_POSITION   = "hold_position"
     PROCEED_SLOW    = "proceed_slow"
     PROCEED_NORMAL  = "proceed_normal"
-    
-    # Habitat related
     RECONFIGURE_POWER   = "reconfigure_power"
     ISOLATE_MODULE      = "isolate_module"
     EMERGENCY_VENT      = "emergency_vent"
-    
-    # Meta
     AWAIT_HUMAN         = "await_human"
     AUTONOMOUS_FALLBACK = "autonomous_fallback"
 
 
 class OverrideLevel(str, Enum):
-    ACKNOWLEDGE = "acknowledge"  # Level 1: Accept AI recommendation
-    MODIFY      = "modify"       # Level 2: Adjust parameters
-    REPLACE     = "replace"      # Level 3: Select different action
-    REJECT      = "reject"       # Level 4: Full manual control
+    ACKNOWLEDGE = "acknowledge"
+    MODIFY      = "modify"
+    REPLACE     = "replace"
+    REJECT      = "reject"
 
 
 @dataclass
@@ -81,22 +65,36 @@ class BaseMessage:
         return json.dumps(asdict(self))
 
     @classmethod
+    def from_dict(cls, data: dict):
+        """
+        Tolerant constructor: silently drops any keys that aren't real
+        dataclass fields on `cls` (e.g. transport-only metadata like
+        'source' or 'raw' added by publishers) instead of raising
+        TypeError: unexpected keyword argument.
+
+        This is the fix for the orchestrator swallowing every simulated
+        and real-model message via a bare `except Exception: print(...)`.
+        """
+        if not isinstance(data, dict):
+            raise TypeError(f"from_dict expects a dict, got {type(data)}")
+        valid_names = {f.name for f in fields(cls)}
+        filtered = {k: v for k, v in data.items() if k in valid_names}
+        return cls(**filtered)
+
+    @classmethod
     def from_json(cls, json_str: str):
-        return cls(**json.loads(json_str))
+        return cls.from_dict(json.loads(json_str))
 
 
 @dataclass
 class PoseEstimateMessage(BaseMessage):
-    """Perception agent -> Redis channel: perception.out"""
     agent_id:     str = AgentID.PERCEPTION
     message_type: str = MessageType.POSE_ESTIMATE
 
-    # Pose
-    R:          list = field(default_factory=list)   # (3,3) rotation matrix
-    t:          list = field(default_factory=list)   # (3,) translation
-    quaternion: list = field(default_factory=list)   # (4,) [w,x,y,z]
+    R:          list = field(default_factory=list)
+    t:          list = field(default_factory=list)
+    quaternion: list = field(default_factory=list)
 
-    # Uncertainty
     jensen_gain:        float = 0.0
     confidence_level:   str   = ConfidenceLevel.HIGH
     confidence_label:   str   = ""
@@ -106,23 +104,20 @@ class PoseEstimateMessage(BaseMessage):
     anchor_distance_deg: float = 0.0
     is_trustworthy:     bool  = True
 
-    # Meta
     processing_time_ms: float = 0.0
     image_shape:        list  = field(default_factory=list)
 
 
 @dataclass
 class SituationVectorMessage(BaseMessage):
-    """Cognition agent -> Redis channel: cognition.out"""
     agent_id:     str = AgentID.COGNITION
     message_type: str = MessageType.SITUATION_VECTOR
 
-    # HDC situation summary
     situation_id:       str   = ""
     anomaly_detected:   bool  = False
     anomaly_type:       str   = "none"
     anomaly_severity:   str   = ConfidenceLevel.HIGH
-    novelty_score:      float = 0.0      # 0=known situation, 1=never seen before
+    novelty_score:      float = 0.0
     similar_case_id:    str   = ""
     similar_case_outcome: str = ""
     recommended_action: str   = ActionType.HOLD_POSITION
@@ -132,7 +127,6 @@ class SituationVectorMessage(BaseMessage):
 
 @dataclass
 class ActionRecommendationMessage(BaseMessage):
-    """Action agent -> Redis channel: action.out"""
     agent_id:     str = AgentID.ACTION
     message_type: str = MessageType.ACTION_RECOMMENDATION
 
@@ -142,10 +136,8 @@ class ActionRecommendationMessage(BaseMessage):
     mission_success_prob: float = 0.0
     resource_cost:      float = 0.0
 
-    # Alternatives (list of dicts for JSON compat)
     alternatives:       list  = field(default_factory=list)
 
-    # Simulation results
     simulation_horizon_s: int   = 60
     mc_runs:              int   = 0
     explanation:          str   = ""
@@ -153,7 +145,6 @@ class ActionRecommendationMessage(BaseMessage):
 
 @dataclass
 class HumanOverrideMessage(BaseMessage):
-    """Human -> Redis channel: human.in"""
     agent_id:     str = AgentID.HUMAN
     message_type: str = MessageType.HUMAN_OVERRIDE
 
@@ -166,7 +157,6 @@ class HumanOverrideMessage(BaseMessage):
 
 @dataclass
 class ConsensusActionMessage(BaseMessage):
-    """Orchestrator -> all agents: consensus decision"""
     agent_id:     str = AgentID.ORCHESTRATOR
     message_type: str = MessageType.CONSENSUS_ACTION
 
@@ -182,7 +172,6 @@ class ConsensusActionMessage(BaseMessage):
 
 @dataclass
 class EscalationMessage(BaseMessage):
-    """Orchestrator -> interface when human input needed"""
     agent_id:     str = AgentID.ORCHESTRATOR
     message_type: str = MessageType.ESCALATION
 
@@ -193,9 +182,8 @@ class EscalationMessage(BaseMessage):
     context:          dict  = field(default_factory=dict)
 
 
-@dataclass 
+@dataclass
 class SystemStatusMessage(BaseMessage):
-    """Orchestrator broadcasts system health"""
     agent_id:     str = AgentID.ORCHESTRATOR
     message_type: str = MessageType.SYSTEM_STATUS
 
