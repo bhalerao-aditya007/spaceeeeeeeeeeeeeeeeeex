@@ -22,7 +22,6 @@ from .armstrong_protocol import ArmstrongProtocol
 
 from .redis_fallback import get_redis_client
 
-# Redis channel names
 CH_PERCEPTION   = "perception.out"
 CH_COGNITION    = "cognition.out"
 CH_ACTION       = "action.out"
@@ -40,17 +39,8 @@ ALL_CHANNELS = [
 
 
 class Orchestrator:
-    """
-    Central coordinator for the spacecraft autonomy system.
-
-    Subscribes to all agent output channels.
-    Runs consensus every decision cycle.
-    Publishes final action to all agents.
-    Handles escalation via Armstrong Protocol.
-    """
-
-    DECISION_CYCLE_S = 1.0   # Run consensus every 1 second
-    STATUS_CYCLE_S   = 5.0   # Broadcast system status every 5 seconds
+    DECISION_CYCLE_S = 1.0
+    STATUS_CYCLE_S   = 5.0
 
     def __init__(self,
                  redis_host: str = "localhost",
@@ -59,13 +49,11 @@ class Orchestrator:
                  hdc_layer=None):
         self.redis_host = redis_host
         self.redis_port = redis_port
-        self.hdc_layer = hdc_layer  # Phase 2 cognition for override learning
+        self.hdc_layer = hdc_layer
 
-        # Redis connections
         self.redis_pub  = get_redis_client(host=redis_host, port=redis_port, db=0)
         self.redis_sub  = get_redis_client(host=redis_host, port=redis_port, db=0)
 
-        # Core components
         self.state      = StateManager()
         self.consensus  = ConsensusEngine()
         self.armstrong  = ArmstrongProtocol(
@@ -74,14 +62,12 @@ class Orchestrator:
             on_override=self._on_human_override
         )
 
-        # Latest messages from each agent
         self._latest_perception: Optional[PoseEstimateMessage] = None
         self._latest_cognition:  Optional[SituationVectorMessage] = None
         self._latest_action:     Optional[ActionRecommendationMessage] = None
         self._latest_human:      Optional[HumanOverrideMessage] = None
         self._msg_lock = threading.Lock()
 
-        # Control flags
         self._running   = False
         self._cycle_count = 0
 
@@ -91,48 +77,32 @@ class Orchestrator:
         print(f"  Armstrong timeout: {decision_timeout_s}s")
 
     def start(self):
-        """Start all orchestrator threads."""
         self._running = True
 
-        # Subscriber thread
         self._sub_thread = threading.Thread(
-            target=self._subscriber_loop,
-            daemon=True,
-            name="orchestrator-subscriber"
+            target=self._subscriber_loop, daemon=True, name="orchestrator-subscriber"
         )
         self._sub_thread.start()
 
-        # Decision cycle thread
         self._decision_thread = threading.Thread(
-            target=self._decision_loop,
-            daemon=True,
-            name="orchestrator-decision"
+            target=self._decision_loop, daemon=True, name="orchestrator-decision"
         )
         self._decision_thread.start()
 
-        # Status broadcast thread
         self._status_thread = threading.Thread(
-            target=self._status_loop,
-            daemon=True,
-            name="orchestrator-status"
+            target=self._status_loop, daemon=True, name="orchestrator-status"
         )
         self._status_thread.start()
 
         print("Orchestrator started — all threads running")
 
     def stop(self):
-        """Graceful shutdown."""
         self._running = False
         print("Orchestrator stopped")
 
     def _subscriber_loop(self):
-        """
-        Listens to all agent channels.
-        Parses messages and updates latest state.
-        """
         pubsub = self.redis_sub.pubsub()
         pubsub.subscribe(*ALL_CHANNELS)
-
         print(f"Subscribed to channels: {ALL_CHANNELS}")
 
         for raw_msg in pubsub.listen():
@@ -141,42 +111,49 @@ class Orchestrator:
             if raw_msg["type"] != "message":
                 continue
 
-            channel = raw_msg["channel"].decode()
-            data    = raw_msg["data"].decode()
+            channel = raw_msg["channel"].decode() if isinstance(raw_msg["channel"], bytes) else raw_msg["channel"]
+            data    = raw_msg["data"].decode() if isinstance(raw_msg["data"], bytes) else raw_msg["data"]
 
             try:
                 self._route_message(channel, data)
             except Exception as e:
-                print(f"[Orchestrator] Error routing message "
-                      f"from {channel}: {e}")
+                print(f"[Orchestrator] Error routing message from {channel}: {e}")
 
     def _route_message(self, channel: str, data: str):
-        """Parse and route incoming message to correct handler."""
+        """
+        Parse and route incoming message to correct handler.
+
+        Uses Message.from_dict(payload) instead of Message(**payload) so
+        transport-only keys (e.g. 'source': 'simulation' / 'real_model')
+        added by publishers never crash construction. This was previously
+        silently eating EVERY perception/cognition/action message via the
+        broad except in _subscriber_loop, meaning consensus always ran on
+        stale/default state.
+        """
         payload = json.loads(data)
 
         with self._msg_lock:
             if channel == CH_PERCEPTION:
-                self._latest_perception = PoseEstimateMessage(**payload)
+                self._latest_perception = PoseEstimateMessage.from_dict(payload)
                 self.state.update_from_perception(self._latest_perception)
                 print(f"[Orchestrator] Perception: "
                       f"confidence={self._latest_perception.confidence_level} "
                       f"JG={self._latest_perception.jensen_gain:.1f}°")
 
             elif channel == CH_COGNITION:
-                self._latest_cognition = SituationVectorMessage(**payload)
+                self._latest_cognition = SituationVectorMessage.from_dict(payload)
                 self.state.update_from_cognition(self._latest_cognition)
                 print(f"[Orchestrator] Cognition: "
                       f"anomaly={self._latest_cognition.anomaly_detected} "
                       f"novelty={self._latest_cognition.novelty_score:.2f}")
 
             elif channel == CH_ACTION:
-                self._latest_action = ActionRecommendationMessage(**payload)
+                self._latest_action = ActionRecommendationMessage.from_dict(payload)
                 self.state.update_from_action(self._latest_action)
-                print(f"[Orchestrator] Action: "
-                      f"{self._latest_action.primary_action}")
+                print(f"[Orchestrator] Action: {self._latest_action.primary_action}")
 
             elif channel == CH_HUMAN_IN:
-                self._latest_human = HumanOverrideMessage(**payload)
+                self._latest_human = HumanOverrideMessage.from_dict(payload)
                 self.state.update_from_human(self._latest_human)
                 self.armstrong.receive_override(self._latest_human)
                 print(f"[Orchestrator] Human override: "
@@ -184,10 +161,6 @@ class Orchestrator:
                       f"-> {self._latest_human.selected_action}")
 
     def _decision_loop(self):
-        """
-        Runs consensus every DECISION_CYCLE_S seconds.
-        Publishes result to orchestrator.consensus channel.
-        """
         while self._running:
             cycle_start = time.time()
 
@@ -196,10 +169,8 @@ class Orchestrator:
                 c = self._latest_cognition
                 a = self._latest_action
                 h = self._latest_human
-                # Consume human override (one-shot)
                 self._latest_human = None
 
-            # Run consensus
             result = self.consensus.run(
                 state=self.state.get_state(),
                 perception_msg=p,
@@ -208,7 +179,6 @@ class Orchestrator:
                 human_msg=h
             )
 
-            # Record decision
             self.state.record_decision(
                 action=result.final_action,
                 reasoning=result.reasoning,
@@ -216,22 +186,18 @@ class Orchestrator:
                 override=result.override_applied
             )
 
-            # Publish consensus to all agents
             self._publish(CH_CONSENSUS, result.to_json())
 
-            # Escalate to human if needed
             if result.escalated_to_human and not result.override_applied:
                 self._escalate(result)
 
             self._cycle_count += 1
 
-            # Maintain cycle timing
             elapsed = time.time() - cycle_start
             sleep_time = max(0, self.DECISION_CYCLE_S - elapsed)
             time.sleep(sleep_time)
 
     def _escalate(self, result: ConsensusActionMessage):
-        """Publish escalation notice to interface agent."""
         esc = EscalationMessage(
             reason=result.reasoning,
             urgency=ConfidenceLevel.MODERATE,
@@ -246,7 +212,6 @@ class Orchestrator:
         self._publish(CH_ESCALATION, esc.to_json())
 
     def _status_loop(self):
-        """Broadcast system health every STATUS_CYCLE_S seconds."""
         while self._running:
             time.sleep(self.STATUS_CYCLE_S)
             self.state.check_agent_health(timeout_s=10.0)
@@ -267,26 +232,21 @@ class Orchestrator:
             self._publish(CH_STATUS, status.to_json())
 
     def _publish(self, channel: str, message: str):
-        """Publish message to Redis channel."""
         try:
             self.redis_pub.publish(channel, message)
         except Exception as e:
             print(f"[Orchestrator] Publish error on {channel}: {e}")
 
     def _on_armstrong_timeout(self):
-        """Called when Armstrong Protocol times out."""
         print("[Orchestrator] Armstrong timeout — publishing HOLD_POSITION")
 
     def _on_human_override(self, msg: HumanOverrideMessage):
-        """Called when human override received — feed back to HDC for learning."""
         print(f"[Orchestrator] Override logged: {msg.override_level}")
 
-        # Feed override to HDC cognition layer for online learning
         if self.hdc_layer is not None:
             try:
                 latest_cog = self._latest_cognition
                 if latest_cog and hasattr(latest_cog, 'situation_id'):
-                    # Use the latest cognition situation vector for learning
                     sit_b64 = getattr(latest_cog, 'situation_vector_b64', None)
                     if sit_b64:
                         self.hdc_layer.learn_outcome(
@@ -300,14 +260,12 @@ class Orchestrator:
                                 "operator": getattr(msg, 'operator_id', 'unknown')
                             }
                         )
-                        print(f"[Orchestrator] HDC learned from override: "
-                              f"{msg.selected_action}")
+                        print(f"[Orchestrator] HDC learned from override: {msg.selected_action}")
             except Exception as e:
                 print(f"[Orchestrator] HDC learn_outcome failed: {e}")
 
     def publish_test_perception(self, confidence: str = "high",
                                 jensen_gain: float = 1.0):
-        """Helper for testing — simulate a perception message."""
         from orchestrator.message_schemas import ActionType
         msg = PoseEstimateMessage(
             R=[[1,0,0],[0,1,0],[0,0,1]],
