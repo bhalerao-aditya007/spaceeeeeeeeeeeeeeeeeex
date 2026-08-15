@@ -1,13 +1,6 @@
 #!/usr/bin/env python3
 """
 Spacecraft Autonomy — Integrated Web Dashboard
-Connects all 5 agents via Redis pub/sub and exposes them through
-a unified web interface with real-time WebSocket updates.
-
-Run from project root:
-    python interface/app.py
-    # or
-    uvicorn interface.app:app --host 0.0.0.0 --port 8000 --reload
 """
 
 import sys
@@ -30,7 +23,7 @@ from typing import Optional, Dict, List, Any
 
 import numpy as np
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header, Depends, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -38,7 +31,7 @@ from pydantic import BaseModel
 from orchestrator.redis_fallback import get_redis_client
 
 # ---------------------------------------------------------------------------
-# Dependency checks — graceful fallback when modules are unavailable
+# Dependency checks
 # ---------------------------------------------------------------------------
 try:
     import redis as redis_lib
@@ -81,16 +74,40 @@ except Exception:
 
 try:
     from perception.perception_agent import PerceptionAgent
+    from perception.models.jensen_gain import JensenGainMonitor
     _PERC = True
 except Exception:
     _PERC = False
 
 # ---------------------------------------------------------------------------
-# Real model loading
+# Minimal auth for control-surface endpoints
+# ---------------------------------------------------------------------------
+# Set OVERRIDE_TOKEN in the deployment environment to lock down
+# /api/override, /api/orchestrator/start|stop, and /api/inject/*.
+# If unset, these stay open (dev/local convenience) — but a startup
+# warning is printed so this is never a silent gap in a real deployment.
+OVERRIDE_TOKEN = os.environ.get("OVERRIDE_TOKEN")
+
+
+def _require_auth(authorization: Optional[str] = Header(None)):
+    if OVERRIDE_TOKEN:
+        if authorization != f"Bearer {OVERRIDE_TOKEN}":
+            raise HTTPException(status_code=401, detail="Unauthorized")
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Real model loading — hard-fail loud on a Git LFS pointer file
 # ---------------------------------------------------------------------------
 _perception_agent: Optional[Any] = None
 _MODEL_LOADED = False
-_MODEL_INFO = {}
+_MODEL_INFO: Dict[str, Any] = {}
+
+# A real ResNet-50/EfficientNet-B3 checkpoint here is ~100MB+. A Git LFS
+# pointer file that failed to resolve is a few hundred bytes. Anything
+# below this floor is treated as a broken checkout, not a model.
+MIN_VALID_CHECKPOINT_BYTES = 5_000_000
+
 
 def _load_perception_model():
     global _perception_agent, _MODEL_LOADED, _MODEL_INFO
@@ -100,8 +117,26 @@ def _load_perception_model():
     model_path = os.path.join(PROJECT_ROOT, "perception", "checkpoints", "best.pt")
     if not os.path.exists(model_path):
         print(f"  [Model] Checkpoint not found: {model_path}")
+        _MODEL_INFO = {"error": "checkpoint_not_found", "path": model_path}
         return
+
     fsize = os.path.getsize(model_path)
+    if fsize < MIN_VALID_CHECKPOINT_BYTES:
+        print("=" * 70)
+        print(f"  [Model] FATAL: checkpoint is only {fsize} bytes.")
+        print("  [Model] This is a Git LFS POINTER FILE, not real weights.")
+        print("  [Model] Run `git lfs pull` (or fix LFS resolution in your "
+              "build pipeline) before deploying.")
+        print("  [Model] Refusing to silently serve an untrained/random model.")
+        print("=" * 70)
+        _MODEL_LOADED = False
+        _MODEL_INFO = {
+            "error": "checkpoint_is_lfs_pointer",
+            "file_size_bytes": fsize,
+            "min_required_bytes": MIN_VALID_CHECKPOINT_BYTES,
+        }
+        return
+
     try:
         _perception_agent = PerceptionAgent(
             model_path=model_path,
@@ -124,8 +159,7 @@ def _load_perception_model():
                 "file_size_mb": float(round(fsize / 1024 / 1024, 1)),
             }
             print(f"  [Model] LOADED CHECKPOINT: {_MODEL_INFO['backbone']}, "
-                  f"epoch {_MODEL_INFO['epoch']}, "
-                  f"{_MODEL_INFO['file_size_mb']}MB")
+                  f"epoch {_MODEL_INFO['epoch']}, {_MODEL_INFO['file_size_mb']}MB")
         except Exception:
             _MODEL_INFO = {
                 "backbone": "resnet50",
@@ -136,10 +170,13 @@ def _load_perception_model():
                 "params": 0,
                 "file_size_mb": float(round(fsize / 1024 / 1024, 4)),
             }
-            print(f"  [Model] LOADED MODEL ARCHITECTURE (ResNet-50 / EfficientNet) with best.pt pointer ({fsize}B)")
+            print(f"  [Model] LOADED MODEL ARCHITECTURE with best.pt pointer ({fsize}B)")
     except Exception as exc:
         print(f"  [Model] Failed to load: {exc}")
         traceback.print_exc()
+        _MODEL_LOADED = False
+        _MODEL_INFO = {"error": "load_exception", "detail": str(exc)}
+
 
 _load_perception_model()
 
@@ -214,7 +251,7 @@ manager = ConnectionManager()
 _msg_q: queue.Queue = queue.Queue(maxsize=2000)
 
 # ---------------------------------------------------------------------------
-# Redis subscriber (runs in background thread)
+# Redis subscriber
 # ---------------------------------------------------------------------------
 CHANNELS = [
     "perception.out", "cognition.out", "action.out",
@@ -224,7 +261,6 @@ CHANNELS = [
 
 
 def _summarize(channel: str, data: dict) -> str:
-    """One-line summary of a Redis message for the event log."""
     try:
         if channel == "perception.out":
             return (f"JG={data.get('jensen_gain','?')}° "
@@ -252,7 +288,6 @@ def _summarize(channel: str, data: dict) -> str:
 
 
 def _redis_subscriber():
-    """Blocking loop — runs in its own thread."""
     redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
     while True:
@@ -278,7 +313,6 @@ def _redis_subscriber():
                 except Exception:
                     payload = {"raw": raw["data"].decode() if isinstance(raw["data"], bytes) else str(raw["data"])}
 
-                # Update latest state
                 _map = {
                     "perception.out": "perception",
                     "cognition.out": "cognition",
@@ -322,12 +356,15 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(application):
-    # Startup
     if _REDIS_LIB:
         threading.Thread(target=_redis_subscriber, daemon=True).start()
     asyncio.create_task(_broadcast_loop())
+    if not OVERRIDE_TOKEN:
+        print("  [Auth] WARNING: OVERRIDE_TOKEN is not set — "
+              "/api/override, orchestrator start/stop, and inject "
+              "endpoints are UNAUTHENTICATED. Set OVERRIDE_TOKEN before "
+              "exposing this deployment publicly.")
     yield
-    # Shutdown
     _redis_running.clear()
 
 app = FastAPI(
@@ -351,7 +388,6 @@ app.add_middleware(
 
 
 async def _broadcast_loop():
-    """Drain _msg_q and push to all WebSocket clients."""
     while True:
         batch = []
         try:
@@ -364,7 +400,6 @@ async def _broadcast_loop():
         await asyncio.sleep(0.05)
 
 
-# ── HTML frontend ──────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def root():
     html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
@@ -390,10 +425,28 @@ async def api_status():
 
 @app.get("/api/model/status")
 async def model_status():
+    # Always surface _MODEL_INFO (which may contain a diagnostic error
+    # dict) rather than hiding it behind `if _MODEL_LOADED`.
     return {
         "loaded": _MODEL_LOADED,
-        "info": _MODEL_INFO if _MODEL_LOADED else None,
+        "info": _MODEL_INFO,
         "perception_available": _PERC,
+    }
+
+
+@app.get("/api/config/thresholds")
+async def config_thresholds():
+    """
+    Single source of truth for Jensen Gain confidence thresholds, so the
+    frontend gauge, any future consumer, and the actual monitor never
+    disagree. Backed directly by perception/models/jensen_gain.py —
+    not duplicated as a hardcoded constant anywhere else.
+    """
+    if not _PERC:
+        return JSONResponse({"error": "perception module not available"}, 503)
+    return {
+        "high_confidence_thresh_deg": JensenGainMonitor.HIGH_CONFIDENCE_THRESH,
+        "moderate_thresh_deg": JensenGainMonitor.MODERATE_THRESH,
     }
 
 
@@ -412,9 +465,9 @@ async def api_decisions():
     return STATE["decision_history"][-50:]
 
 
-# ── Orchestrator control ───────────────────────────────────────────────────
+# ── Orchestrator control (auth-gated) ───────────────────────────────────────
 @app.post("/api/orchestrator/start")
-async def start_orch():
+async def start_orch(_auth: bool = Depends(_require_auth)):
     global _orchestrator
     if not _ORCH:
         return JSONResponse({"error": "Orchestrator module not available"}, 500)
@@ -431,7 +484,7 @@ async def start_orch():
 
 
 @app.post("/api/orchestrator/stop")
-async def stop_orch():
+async def stop_orch(_auth: bool = Depends(_require_auth)):
     global _orchestrator
     if _orchestrator and STATE["orchestrator_running"]:
         _orchestrator.stop()
@@ -461,7 +514,7 @@ async def list_scenarios():
 
 
 @app.post("/api/scenario/{name}")
-async def run_scenario(name: str, speed: float = 5.0):
+async def run_scenario(name: str, speed: float = 5.0, _auth: bool = Depends(_require_auth)):
     if not _SIM:
         return JSONResponse({"error": "Simulation module not available"}, 500)
     if STATE["scenario_running"]:
@@ -475,25 +528,22 @@ async def run_scenario(name: str, speed: float = 5.0):
     def _run():
         STATE["scenario_running"] = True
         STATE["current_scenario"] = name
-        _msg_q.put({"type": "system_event", "event": "scenario_started",
-                     "scenario": name})
+        _msg_q.put({"type": "system_event", "event": "scenario_started", "scenario": name})
         try:
             eng = ScenarioEngine()
             eng.run_scenario(_SCENARIOS[name](), speed=speed)
         except Exception as exc:
-            _msg_q.put({"type": "system_event", "event": "scenario_error",
-                         "error": str(exc)})
+            _msg_q.put({"type": "system_event", "event": "scenario_error", "error": str(exc)})
         finally:
             STATE["scenario_running"] = False
             STATE["current_scenario"] = None
-            _msg_q.put({"type": "system_event", "event": "scenario_complete",
-                         "scenario": name})
+            _msg_q.put({"type": "system_event", "event": "scenario_complete", "scenario": name})
 
     threading.Thread(target=_run, daemon=True).start()
     return {"status": "started", "scenario": name, "speed": speed}
 
 
-# ── Override (Armstrong Protocol) ──────────────────────────────────────────
+# ── Override (Armstrong Protocol) — auth-gated ──────────────────────────────
 class OverrideRequest(BaseModel):
     level: str = "acknowledge"
     action: str = "hold_position"
@@ -502,7 +552,7 @@ class OverrideRequest(BaseModel):
 
 
 @app.post("/api/override")
-async def send_override(req: OverrideRequest):
+async def send_override(req: OverrideRequest, _auth: bool = Depends(_require_auth)):
     try:
         r = get_redis_client(url=os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
         msg = {
@@ -524,7 +574,7 @@ async def send_override(req: OverrideRequest):
         return JSONResponse({"error": str(exc)}, 500)
 
 
-# ── Test injection ─────────────────────────────────────────────────────────
+# ── Test injection (auth-gated) ─────────────────────────────────────────────
 class InjectPerceptionRequest(BaseModel):
     jensen_gain: float = 2.5
     confidence: str = "moderate"
@@ -532,7 +582,7 @@ class InjectPerceptionRequest(BaseModel):
 
 
 @app.post("/api/inject/perception")
-async def inject_perception(req: InjectPerceptionRequest):
+async def inject_perception(req: InjectPerceptionRequest, _auth: bool = Depends(_require_auth)):
     try:
         r = get_redis_client(url=os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
         msg = {
@@ -550,7 +600,7 @@ async def inject_perception(req: InjectPerceptionRequest):
             "sigma_t_m": round(0.05 * req.distance, 2),
             "nearest_anchor_idx": 0,
             "anchor_distance_deg": round(req.jensen_gain * 0.4, 2),
-            "is_trustworthy": req.jensen_gain < 15.0,
+            "is_trustworthy": req.jensen_gain < JensenGainMonitor.HIGH_CONFIDENCE_THRESH if _PERC else req.jensen_gain < 15.0,
             "processing_time_ms": 33.0,
             "image_shape": [224, 224, 3],
         }
@@ -570,7 +620,7 @@ class InjectCognitionRequest(BaseModel):
 
 
 @app.post("/api/inject/cognition")
-async def inject_cognition(req: InjectCognitionRequest):
+async def inject_cognition(req: InjectCognitionRequest, _auth: bool = Depends(_require_auth)):
     try:
         r = get_redis_client(url=os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
         msg = {
@@ -596,17 +646,15 @@ async def inject_cognition(req: InjectCognitionRequest):
         return JSONResponse({"error": str(exc)}, 500)
 
 
-# ── Camera frame processing (REAL MODEL) ──────────────────────────────────
+# ── Camera frame processing (unauthenticated — read-only inference) ────────
 class FrameRequest(BaseModel):
-    image: str  # base64-encoded JPEG/PNG
+    image: str
 
 
 @app.post("/api/perception/frame")
 async def process_camera_frame(req: FrameRequest):
-    """Process a camera frame through the real EfficientNet-B3 model."""
     t_start = time.time()
 
-    # Decode base64 image
     try:
         img_data = req.image
         if "," in img_data:
@@ -615,19 +663,16 @@ async def process_camera_frame(req: FrameRequest):
         from PIL import Image
         img_pil = Image.open(BytesIO(img_bytes)).convert("RGB")
         img_np = np.array(img_pil)
-        
-        # Save last uploaded image for offline debugging
+
         try:
             os.makedirs(os.path.join(PROJECT_ROOT, "perception", "outputs"), exist_ok=True)
             img_pil.save(os.path.join(PROJECT_ROOT, "perception", "outputs", "last_uploaded.png"))
-            print("  [Debug] Saved last uploaded image to perception/outputs/last_uploaded.png")
         except Exception as e:
             print(f"  [Debug] Failed to save last uploaded image: {e}")
     except Exception as exc:
         return JSONResponse({"error": f"Failed to decode image: {exc}"}, 400)
 
     if _MODEL_LOADED and _perception_agent is not None:
-        # ── Real model inference ──
         try:
             output = _perception_agent.predict(img_np)
             result = {
@@ -651,19 +696,16 @@ async def process_camera_frame(req: FrameRequest):
                 "image_shape": list(img_np.shape),
             }
 
-            # Publish to Redis
             try:
                 r = get_redis_client(url=os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
                 r.publish("perception.out", json.dumps(result, default=str))
             except Exception:
                 pass
 
-            # Also push directly to WebSocket
             _msg_q.put({"type": "redis_message", "channel": "perception.out",
                          "data": result, "timestamp": time.time()})
             STATE["latest"]["perception"] = result
 
-            # Print raw model outputs to terminal
             print(f"\n>>> [MODEL INFERENCE OUTPUT] <<<")
             print(f"  Translation (t): {[round(x, 4) for x in output.pose.t]}")
             print(f"  Quaternion (q):  {[round(x, 4) for x in output.pose.quaternion]}")
@@ -687,12 +729,13 @@ async def process_camera_frame(req: FrameRequest):
         except Exception as exc:
             return JSONResponse({"error": f"Model inference failed: {exc}"}, 500)
     else:
-        # No model loaded — return explicit error instead of synthetic data
         return JSONResponse({
-            "error": "Model not loaded. Upload best.pt to perception/checkpoints/ "
-                     "and restart the server. Run: git lfs pull",
+            "error": "Model not loaded. " + str(_MODEL_INFO.get(
+                "error", "Upload best.pt to perception/checkpoints/ and restart. "
+                         "Run: git lfs pull")),
             "model_loaded": False,
             "perception_available": _PERC,
+            "diagnostic": _MODEL_INFO,
         }, 503)
 
 
@@ -770,7 +813,7 @@ async def chat(req: ChatRequest):
         return {"response": "The Armstrong Protocol defines 4 human override levels: 1) Acknowledge, 2) Modify Constraints, 3) Replace Action, 4) Full Manual Override. It acts as the ultimate safety net.", "route": "knowledge_base"}
 
     if any(k in text for k in ("jensen", "gain", "hdc", "hyperdimensional")):
-        return {"response": "Jensen Gain (JG) is an uncertainty metric derived from Jensen-Shannon divergence in our Perception Agent. Hyperdimensional Cognition (HDC) uses robust vector-symbolic architectures to detect novel anomalies in spacecraft telemetry.", "route": "knowledge_base"}
+        return {"response": "Jensen Gain (JG) is an uncertainty metric derived from prediction spread across in-plane rotations in our Perception Agent. Hyperdimensional Cognition (HDC) uses robust vector-symbolic architectures to detect novel anomalies in spacecraft telemetry.", "route": "knowledge_base"}
 
     return {"response": ("Commands: 'status report', 'explain', "
                          "'what are my options', 'perception', "
@@ -778,9 +821,15 @@ async def chat(req: ChatRequest):
             "route": "help"}
 
 
-# ── WebSocket ──────────────────────────────────────────────────────────────
+# ── WebSocket (auth-gated when OVERRIDE_TOKEN is set) ───────────────────────
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
+    if OVERRIDE_TOKEN:
+        token = ws.query_params.get("token")
+        if token != OVERRIDE_TOKEN:
+            await ws.close(code=4401)
+            return
+
     await manager.connect(ws)
     try:
         await ws.send_json({
@@ -805,8 +854,6 @@ async def ws_endpoint(ws: WebSocket):
 
 
 def _safe_latest() -> dict:
-    """Return STATE['latest'] with numpy arrays converted."""
-    import copy
     out = {}
     for k, v in STATE["latest"].items():
         if v is None:
@@ -829,7 +876,7 @@ if __name__ == "__main__":
     for mod, ok in STATE["modules"].items():
         tag = "[OK]" if ok else "[--]"
         print(f"    {mod:15s} {tag}")
-    print(f"  Model: {'LOADED (' + _MODEL_INFO.get('backbone','') + ')' if _MODEL_LOADED else 'NOT LOADED'}")
+    print(f"  Model: {'LOADED (' + _MODEL_INFO.get('backbone','') + ')' if _MODEL_LOADED else 'NOT LOADED — ' + str(_MODEL_INFO.get('error',''))}")
     print(f"\n  Starting server at http://localhost:{port}")
     print("=" * 55)
 
