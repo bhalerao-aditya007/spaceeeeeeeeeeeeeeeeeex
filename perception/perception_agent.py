@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Callable, Optional
 from dataclasses import dataclass, asdict
 import json
-
+from perception.physics_crosscheck import PhysicsCrossChecker
 from perception.models.hopf_grid import HopfFibrationGrid
 from perception.models.jensen_gain import JensenGainMonitor
 
@@ -25,6 +25,8 @@ class UncertaintyEstimate:
     sigma_t_m: float
     nearest_anchor_idx: int
     anchor_distance_deg: float
+    physics_residual_m: float = 0.0 
+    physics_consistent: bool = True 
 
 
 @dataclass
@@ -62,7 +64,9 @@ class PerceptionAgent:
                  n_elevation: int = 64,
                  n_inplane: int = 16,
                  n_jensen_rotations: int = 16,
-                 run_jensen_gain: bool = True):
+                 run_jensen_gain: bool = True,
+                 mean_motion: float = 0.001107,  
+                 physics_residual_threshold_m: float = 2.0):
 
         if model_path is None and pose_fn is None:
             raise ValueError("Provide either model_path or pose_fn")
@@ -77,7 +81,10 @@ class PerceptionAgent:
         )
 
         self.jg_monitor = JensenGainMonitor(n_rotations=n_jensen_rotations)
-
+        self.physics_checker = PhysicsCrossChecker(     
+            mean_motion=mean_motion,
+            residual_threshold_m=physics_residual_threshold_m
+        )
         if model_path is not None:
             self._load_model(model_path)
 
@@ -213,8 +220,10 @@ class PerceptionAgent:
             image = image.astype(np.float32) / 255.0
 
         R, t = self._pose_fn_wrapper(image)
+        
 
         anchor_idx, anchor_dist, R_anchor = self.grid.find_nearest_anchor(R)
+        physics_check = self.physics_checker.update(t, t_start.timestamp())
 
         if self.run_jensen_gain:
             def _pose_only(img):
@@ -252,6 +261,8 @@ class PerceptionAgent:
                 sigma_t_m=self._estimate_sigma_t(jensen_gain, t_magnitude),
                 nearest_anchor_idx=int(anchor_idx),
                 anchor_distance_deg=float(np.degrees(anchor_dist))
+                physics_residual_m=physics_check.get("physics_residual_m", 0.0), 
+                physics_consistent=physics_check.get("physics_consistent", True)
             ),
             metadata={
                 "timestamp": t_start.isoformat(),
