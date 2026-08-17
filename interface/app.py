@@ -692,6 +692,8 @@ async def process_camera_frame(req: FrameRequest):
                 "nearest_anchor_idx": output.uncertainty.nearest_anchor_idx,
                 "anchor_distance_deg": output.uncertainty.anchor_distance_deg,
                 "is_trustworthy": output.is_trustworthy,
+                "physics_residual_m": output.uncertainty.physics_residual_m,
+                "physics_consistent": output.uncertainty.physics_consistent,
                 "processing_time_ms": output.metadata["processing_time_ms"],
                 "image_shape": list(img_np.shape),
             }
