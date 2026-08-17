@@ -7,9 +7,21 @@ import json
 import numpy as np
 from datetime import datetime, timezone
 from typing import Optional, Dict
+from scipy.stats import beta
 from .physics import SpacecraftConfig, PhysicsSimulator
 from .counterfactual import CounterfactualEngine
 from scipy.spatial.transform import Rotation as SciRotation
+
+def clopper_pearson_upper_bound(n_successes: int, n_trials: int,
+                                 confidence: float = 0.99) -> float:
+    """One-sided exact upper confidence bound on a binomial proportion."""
+    if n_trials <= 0:
+        return 1.0
+    if n_successes <= 0:
+        return 1.0 - (1.0 - confidence) ** (1.0 / n_trials)
+    if n_successes >= n_trials:
+        return 1.0
+    return float(beta.ppf(confidence, n_successes + 1, n_trials - n_successes))
 
 class ActionAgent:
     def __init__(self, config: SpacecraftConfig,
@@ -95,14 +107,16 @@ class ActionAgent:
         q_scipy = SciRotation.from_matrix(R_arr).as_quat()  # [x,y,z,w]
         return np.roll(q_scipy, 1).tolist()  # [w,x,y,z]
 
-    def _format_payload(self, results: list) -> Dict:
+def _format_payload(self, results: list) -> Dict:
         actions_out = []
         for r in results:
-            # Compute 95% CI approx as mean ± 1.96*std for collision
             p_mean = r['metrics']['tactical']['collision_probability']
             p_std = r['metrics']['tactical']['collision_probability_std']
-            ci_low = max(0.0, p_mean - 1.96 * p_std)
-            ci_high = min(1.0, p_mean + 1.96 * p_std)
+
+            # n_mc from the actual trajectory ensemble size, not a config constant
+            n_mc = r['metrics']['tactical']['trajectories'].shape[0]
+            n_collisions = int(round(p_mean * n_mc))
+            p_upper_99 = clopper_pearson_upper_bound(n_collisions, n_mc, confidence=0.99)
 
             actions_out.append({
                 'name': r['action'],
@@ -111,7 +125,8 @@ class ActionAgent:
                     'collision_probability': {
                         'mean': round(p_mean, 4),
                         'std': round(p_std, 4),
-                        'ci_95': [round(ci_low, 4), round(ci_high, 4)]
+                        'guaranteed_upper_bound_99pct': round(p_upper_99, 4),
+                        'n_mc': n_mc,
                     },
                     'final_soc': {
                         'mean': round(r['metrics']['strategic']['final_soc_mean'], 4),
@@ -119,23 +134,3 @@ class ActionAgent:
                     }
                 }
             })
-
-        # Trajectory point-clouds for Phase 4 visualization
-        viz_data = {}
-        for r in results:
-            viz_data[r['action']] = {
-                'trajectory_mean': np.mean(r['metrics']['tactical']['trajectories'], axis=0).tolist(),
-                'resource_mean': np.mean(r['metrics']['strategic']['resources'], axis=0).tolist()
-            }
-
-        return {
-            'agent_id': 'action',
-            'message_type': 'action_recommendation',
-            'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-            'payload': {
-                'situation_id': (self.latest_situation or {}).get('situation_id', 'unknown'),
-                'recommended_action': results[0]['action'],
-                'all_actions': actions_out,
-                'visualization_data': viz_data
-            }
-        }
