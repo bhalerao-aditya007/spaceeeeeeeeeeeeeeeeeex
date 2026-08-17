@@ -140,19 +140,18 @@ class ConsensusEngine:
         action_vote = ActionType.HOLD_POSITION
         if action_msg is not None:
             if action_msg.primary_action in self.HIGH_RISK_ACTIONS:
-                # High risk — don't vote for it, escalate to human
+                action_vote = ActionType.AWAIT_HUMAN
+                escalate = True
+            elif action_msg.collision_prob_upper_bound_99 > 0.15:
+                # mean looked fine but the exact 99% bound is not — escalate
                 action_vote = ActionType.AWAIT_HUMAN
                 reasoning_parts.append(
-                    f"Action proposed HIGH-RISK {action_msg.primary_action} "
-                    f"-> escalating to human"
+                    f"Collision prob mean={action_msg.collision_prob:.2f} but "
+                    f"99% bound={action_msg.collision_prob_upper_bound_99:.2f} -> escalating"
                 )
                 escalate = True
             else:
                 action_vote = action_msg.primary_action
-                reasoning_parts.append(
-                    f"Action: {action_msg.primary_action} "
-                    f"(collision_prob={action_msg.collision_prob:.2f})"
-                )
         else:
             action_vote = ActionType.HOLD_POSITION
             reasoning_parts.append("No action data -> HOLD")
