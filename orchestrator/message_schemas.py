@@ -103,6 +103,8 @@ class PoseEstimateMessage(BaseMessage):
     nearest_anchor_idx: int   = 0
     anchor_distance_deg: float = 0.0
     is_trustworthy:     bool  = True
+    physics_residual_m: float = 0.0    
+    physics_consistent: bool  = True
 
     processing_time_ms: float = 0.0
     image_shape:        list  = field(default_factory=list)
