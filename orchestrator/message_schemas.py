@@ -173,6 +173,8 @@ class ConsensusActionMessage(BaseMessage):
     escalated_to_human: bool  = False
     reasoning:          str   = ""
     fallback_triggered: bool  = False
+    required_autonomy_level: str = "AUTONOMOUS"  
+    autonomy_reasons:   list  = field(default_factory=list)  
 
 
 @dataclass
