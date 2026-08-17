@@ -3,6 +3,7 @@ import time
 import threading
 from typing import Optional, Dict, Any
 from dataclasses import dataclass, field, asdict
+from .audit_log import HashChainedLog
 from .message_schemas import (
     ConfidenceLevel, ActionType,
     PoseEstimateMessage, SituationVectorMessage,
@@ -78,6 +79,7 @@ class StateManager:
         self._state = SharedState()
         self._lock = threading.RLock()
         self._history_limit = 100
+        self.audit_log = HashChainedLog()
 
     def get_state(self) -> SharedState:
         with self._lock:
@@ -134,6 +136,7 @@ class StateManager:
             if len(self._state.decision_history) > self._history_limit:
                 self._state.decision_history.pop(0)
             self._state.total_decisions += 1
+            self.audit_log.append(entry)
 
     def update_agent_heartbeat(self, agent_id: str):
         with self._lock:
