@@ -15,6 +15,7 @@ import base64
 import threading
 from collections import defaultdict
 from datetime import datetime, timezone
+from cognition.causal_graph import SubsystemState, find_root_cause
 
 # ==============================================================================
 # CONFIGURATION & ENUMS
@@ -397,6 +398,11 @@ class AnomalyEncoder:
                 "o2": o2_state, "co2": co2_state, "pressure": press_state,
                 "battery": batt_state, "solar": solar_state, "radiator": rad_state
             }
+            "top_level_states": { 
+                "life_support": self._worst(o2_state, co2_state, press_state),
+                "power": self._worst(batt_state, solar_state),
+                "thermal": rad_state,
+            }
         }
     
     def encode_anomaly(self, anomaly: AnomalyReport) -> np.ndarray:
@@ -407,6 +413,11 @@ class AnomalyEncoder:
         v_sev = self.im.get(f"severity_{anomaly.severity}")
         v_risk = self.im.get(f"risk_{anomaly.propagation_risk}")
         return self.engine.bind(v_fail, v_sev, v_risk)
+
+    @staticmethod
+    def _worst(*states: str) -> str:
+        rank = {"nominal": 0, "degraded": 1, "critical": 2, "failed": 3}
+        return max(states, key=lambda s: rank.get(s, 0))
 
 # ==============================================================================
 # PHASE 2.4: SITUATIONAL AWARENESS & ASSOCIATIVE MEMORY
@@ -705,6 +716,11 @@ class HyperdimensionalCognitionLayer:
         
         # Bundle subsystem health with anomaly signature
         v_anomaly = self.engine.bundle([v_subsystem, v_anomaly_sig])
+        top_states = {
+            name: SubsystemState(name=name, severity=sev)
+            for name, sev in telem_encoded["top_level_states"].items()
+        }
+        root_cause_info = find_root_cause(top_states)
         
         # 3. Mission phase
         v_mission = self.item_memory.get(mission_phase)
@@ -758,8 +774,11 @@ class HyperdimensionalCognitionLayer:
                 "recommended_action": detection["recommendation"],
                 "nearest_cases": detection["nearest_cases"],
                 "human_prompt": detection["human_prompt"],
+                "root_cause": root_cause_info["root_cause"],     
+                "root_cause_narrative": root_cause_info["narrative"], 
                 "explanation": {
-                    "narrative": narrative,
+                    "narrative": (root_cause_info["narrative"] + " " + narrative)
+                                 if root_cause_info["root_cause"] else narrative,
                     "component_breakdown": decomposition,
                     "similarity_heatmap": heatmap
                 },
