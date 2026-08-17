@@ -862,6 +862,12 @@ def _safe_latest() -> dict:
             out[k] = json.loads(json.dumps(v, default=str))
     return out
 
+@app.get("/api/audit/verify")
+async def audit_verify():
+    from orchestrator.audit_log import HashChainedLog
+    result = HashChainedLog.verify("orchestrator/logs/decision_log.jsonl")
+    return result
+
 
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
