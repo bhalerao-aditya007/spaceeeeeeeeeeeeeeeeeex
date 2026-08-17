@@ -131,6 +131,9 @@ def hdc_output_to_redis_msg(hdc_result: dict) -> SituationVectorMessage:
         recommended_action=mapped_action,
         action_confidence=float(payload.get("max_similarity", 0.5)),
         explanation=narrative[:200] if narrative else "HDC nominal"
+        root_cause=payload.get("root_cause") or "",                       
+        root_cause_narrative=payload.get("root_cause_narrative", "")[:200], 
+
     )
 
 
