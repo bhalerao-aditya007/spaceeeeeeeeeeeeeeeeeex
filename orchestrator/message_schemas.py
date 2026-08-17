@@ -133,6 +133,7 @@ class ActionRecommendationMessage(BaseMessage):
     primary_action:     str   = ActionType.HOLD_POSITION
     primary_score:      float = 0.0
     collision_prob:     float = 0.0
+    collision_prob_upper_bound_99: float = 0.0
     mission_success_prob: float = 0.0
     resource_cost:      float = 0.0
 
