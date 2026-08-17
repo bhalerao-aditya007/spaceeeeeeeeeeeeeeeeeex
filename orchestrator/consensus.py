@@ -84,30 +84,39 @@ class ConsensusEngine:
         # ── Rule 1: Perception confidence check ─────────────────────────
         perception_vote = ActionType.HOLD_POSITION
         if perception_msg is not None:
-            if not perception_msg.is_trustworthy:
-                # Force conservative — low confidence pose
+            vision_ok = perception_msg.is_trustworthy
+            physics_ok = perception_msg.physics_consistent
+
+            if not vision_ok and not physics_ok:
                 perception_vote = ActionType.HOLD_POSITION
                 reasoning_parts.append(
-                    f"Perception LOW confidence "
-                    f"(Jensen Gain {perception_msg.jensen_gain:.1f}°) "
-                    f"-> forcing HOLD"
+                    f"BOTH vision self-consistency (JG={perception_msg.jensen_gain:.1f}°) "
+                    f"AND physics cross-check (residual={perception_msg.physics_residual_m:.2f}m) "
+                    f"failed -> HIGH SEVERITY escalation"
+                )
+                escalate = True
+            elif not physics_ok:
+                perception_vote = ActionType.HOLD_POSITION
+                reasoning_parts.append(
+                    f"Vision confident but physics disagrees "
+                    f"(residual={perception_msg.physics_residual_m:.2f}m) -> distrust vision"
+                )
+                escalate = True
+            elif not vision_ok:
+                perception_vote = ActionType.HOLD_POSITION
+                reasoning_parts.append(
+                    f"Perception LOW confidence (Jensen Gain {perception_msg.jensen_gain:.1f}°) -> forcing HOLD"
                 )
                 escalate = True
             else:
                 perception_vote = ActionType.PROCEED_SLOW
-                reasoning_parts.append(
-                    f"Perception OK "
-                    f"(Jensen Gain {perception_msg.jensen_gain:.1f}°)"
-                )
+                reasoning_parts.append(f"Perception OK (Jensen Gain {perception_msg.jensen_gain:.1f}°)")
         else:
-            # No perception data -> stale -> conservative
             perception_vote = ActionType.HOLD_POSITION
             reasoning_parts.append("No perception data -> HOLD")
             fallback = True
 
-        votes["perception"] = perception_vote
-
-        # ── Rule 2: Cognition novelty check ─────────────────────────────
+        votes["perception"] = perception_vote        # ── Rule 2: Cognition novelty check ─────────────────────────────
         cognition_vote = ActionType.HOLD_POSITION
         if cognition_msg is not None:
             if cognition_msg.novelty_score > 0.7:
