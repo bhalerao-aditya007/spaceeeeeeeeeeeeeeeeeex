@@ -1,4 +1,5 @@
 from typing import Dict, Optional
+from .autonomy_ladder import required_autonomy_level
 from .message_schemas import (
     ActionType, ConfidenceLevel, OverrideLevel,
     PoseEstimateMessage, SituationVectorMessage,
@@ -186,7 +187,20 @@ class ConsensusEngine:
                 f"-> conservative tiebreak: {final_action}"
             )
             if not escalate:
-                escalate = True  # Always escalate on conflict
+                escalate = True  
+                
+        jg = perception_msg.jensen_gain if perception_msg is not None else 0.0
+        physics_ok = perception_msg.physics_consistent if perception_msg is not None else True
+        novelty = cognition_msg.novelty_score if cognition_msg is not None else 0.0
+        ladder = required_autonomy_level(
+            jensen_gain_deg=jg,
+            physics_consistent=physics_ok,
+            is_in_distribution=True,   
+            novelty_score=novelty
+        )
+        if ladder["required_level"] != "AUTONOMOUS" and not escalate:
+            escalate = True
+            reasoning_parts.append(f"Autonomy ladder requires {ladder['required_level']}: {ladder['reasons']}")
 
         return ConsensusActionMessage(
             final_action=final_action,
@@ -196,7 +210,9 @@ class ConsensusEngine:
             override_level="",
             escalated_to_human=escalate,
             reasoning=" | ".join(reasoning_parts),
-            fallback_triggered=fallback
+            fallback_triggered=fallback,
+            required_autonomy_level=str(ladder["required_level"]), 
+            autonomy_reasons=ladder["reasons"],    
         )
 
     def _apply_human_override(self,
