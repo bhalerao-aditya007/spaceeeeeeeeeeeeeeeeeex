@@ -125,6 +125,8 @@ class SituationVectorMessage(BaseMessage):
     recommended_action: str   = ActionType.HOLD_POSITION
     action_confidence:  float = 0.0
     explanation:        str   = ""
+    root_cause:          str = ""             
+    root_cause_narrative: str = ""            
 
 
 @dataclass
