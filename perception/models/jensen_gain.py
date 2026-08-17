@@ -51,6 +51,14 @@ class JensenGainMonitor:
         self.n_rotations = n_rotations
         self.angles_deg = np.linspace(0, 360, n_rotations, endpoint=False)
         self.angles_rad = np.radians(self.angles_deg)
+        self.calibrated = None
+        if calibration_table_path:
+            try:
+                from perception.models.calibrated_confidence import CalibratedConfidence
+                self.calibrated = CalibratedConfidence(calibration_table_path)
+            except FileNotFoundError:
+                print(f"[JensenGainMonitor] calibration table not found at "
+                      f"{calibration_table_path}, using hardcoded thresholds")
 
     def _rotate_image_inplane(self, image: np.ndarray, angle_deg: float) -> np.ndarray:
         """
