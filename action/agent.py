@@ -107,30 +107,28 @@ class ActionAgent:
         q_scipy = SciRotation.from_matrix(R_arr).as_quat()  # [x,y,z,w]
         return np.roll(q_scipy, 1).tolist()  # [w,x,y,z]
 
-def _format_payload(self, results: list) -> Dict:
-        actions_out = []
-        for r in results:
-            p_mean = r['metrics']['tactical']['collision_probability']
-            p_std = r['metrics']['tactical']['collision_probability_std']
+    def _format_payload(self, results: list) -> Dict:
+            actions_out = []
+            for r in results:
+                p_mean = r['metrics']['tactical']['collision_probability']
+                p_std = r['metrics']['tactical']['collision_probability_std']
+                n_mc = r['metrics']['tactical']['trajectories'].shape[0]
+                n_collisions = int(round(p_mean * n_mc))
+                p_upper_99 = clopper_pearson_upper_bound(n_collisions, n_mc, confidence=0.99)
 
-            # n_mc from the actual trajectory ensemble size, not a config constant
-            n_mc = r['metrics']['tactical']['trajectories'].shape[0]
-            n_collisions = int(round(p_mean * n_mc))
-            p_upper_99 = clopper_pearson_upper_bound(n_collisions, n_mc, confidence=0.99)
-
-            actions_out.append({
-                'name': r['action'],
-                'score': round(r['score'], 4),
-                'metrics': {
-                    'collision_probability': {
-                        'mean': round(p_mean, 4),
-                        'std': round(p_std, 4),
-                        'guaranteed_upper_bound_99pct': round(p_upper_99, 4),
-                        'n_mc': n_mc,
-                    },
-                    'final_soc': {
-                        'mean': round(r['metrics']['strategic']['final_soc_mean'], 4),
-                        'std': round(r['metrics']['strategic']['final_soc_std'], 4)
+                actions_out.append({
+                    'name': r['action'],
+                    'score': round(r['score'], 4),
+                    'metrics': {
+                        'collision_probability': {
+                            'mean': round(p_mean, 4),
+                            'std': round(p_std, 4),
+                            'guaranteed_upper_bound_99pct': round(p_upper_99, 4),
+                            'n_mc': n_mc,
+                        },
+                        'final_soc': {
+                            'mean': round(r['metrics']['strategic']['final_soc_mean'], 4),
+                            'std': round(r['metrics']['strategic']['final_soc_std'], 4)
+                        }
                     }
-                }
-            })
+                })
