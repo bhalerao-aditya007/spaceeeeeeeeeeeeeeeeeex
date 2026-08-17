@@ -9,6 +9,7 @@ import json
 import time
 import threading
 import numpy as np
+from action.agent import clopper_pearson_upper_bound
 import redis
 from orchestrator.redis_fallback import get_redis_client
 
@@ -158,6 +159,9 @@ def action_result_to_redis_msg(results: list) -> ActionRecommendationMessage:
 
     best = results[0]
     collision = best["metrics"]["tactical"]["collision_probability"]
+    n_mc_best = best["metrics"]["tactical"]["trajectories"].shape[0]
+    n_coll_best = int(round(collision * n_mc_best))
+    collision_upper = clopper_pearson_upper_bound(n_coll_best, n_mc_best, 0.99)
     mapped = action_map.get(best["action"], "hold_position")
 
     alternatives = []
@@ -172,6 +176,7 @@ def action_result_to_redis_msg(results: list) -> ActionRecommendationMessage:
         primary_action=mapped,
         primary_score=round(best["score"], 3),
         collision_prob=round(collision, 3),
+        collision_prob_upper_bound_99=round(collision_upper, 3),
         mission_success_prob=round(1.0 - collision, 3),
         resource_cost=0.2,
         alternatives=alternatives,
